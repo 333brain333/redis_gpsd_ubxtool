@@ -55,7 +55,7 @@ class device_unplug_handler(threading.Thread):
             except AttributeError:
                 print('No devices connected')
                 redis_client.set('connection','no connection')
-                restart_gpsd()
+                #restart_gpsd()
             time.sleep(0.2)
 
 
@@ -121,26 +121,36 @@ if __name__ == '__main__':
 
 
 
-    import re
+ 
+
+import re
+import threading
+import subprocess
 def run(command):
+    print(command)
     p = subprocess.Popen(command, shell = True, stdout = subprocess.PIPE)
     (output, err) = p.communicate()
     p_status =  p.wait()
-    #print(output)
+    print(output)
     return output
+class ubx_to_redis(threading.Thread):
+    def __init__(self):
+        threading.Thread.__init__(self)
+    def ubx_get_item(self, item):
+        return 'ubxtool -P 27.12 -g {}'.format(item)
+    def run(self):
+        while True:# gps_thread.running:
+            items = ['CFG-NAVSPG-DYNMODEL',\
+                        'CFG-RATE-MEAS',\
+                        'CFG-SBAS-USE_TESTMODE',\
+                        'CFG-SBAS-USE_RANGING',\
+                        'CFG-SBAS-PRNSCANMASK',\
+                        'CFG-SIGNAL-SBAS_ENA',
+                        '']
+            for item in items:
+                print('\n',item, '\n')
+                a = run(self.ubx_get_item(item))
+                print(re.findall('val \d*', a.decode('utf-8')))
 
-def make_ubx_bet_cmd(item):
-    return 'ubxtool -P 27.12 -g {}'.format(item)
-
-items = ['CFG-NAVSPG-DYNMODEL',\
-            'CFG-RATE-MEAS',\
-            'CFG-SBAS-USE_TESTMODE',\
-            'CFG-SBAS-USE_RANGING',\
-            'CFG-SBAS-PRNSCANMASK',\
-            'CFG-SIGNAL-SBAS_ENA',
-            '']
-for item in items:
-    print('\n',item, '\n')
-    a = run(make_ubx_bet_cmd(item))
-    print(re.findall('val \d*', a.decode('utf-8')))
-
+ubx_to_redis_thread = ubx_to_redis()
+ubx_to_redis_thread.start()
