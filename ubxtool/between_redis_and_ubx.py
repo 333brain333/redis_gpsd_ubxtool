@@ -11,36 +11,50 @@ import re
 gpsd = None #seting the global variablecute
 report = None
 satellites = None
-fields_TPV = ['lat',\
-        'lon',\
-        'device',\
-        'mode',\
-        'status',\
-        'altHAE',\
-        'speed',\
-        'eph',]
-fields_SKY = ['hdop']
+
 
 redis_defaults = {
+    'connection':'not connected',
+    'rtk_source':'disabled',
+    'rtk':{
+        'user':None,
+        'password':None,
+        'server':None,
+        'port':None,
+        'stream':None
+    },
     'ubxtool':{
-    'CFG-NAVSPG-DYNMODEL':4,\
-    'CFG-RATE-MEAS':100,\
-    'CFG-SBAS-USE_TESTMODE':1,\
-    'CFG-SBAS-USE_RANGING':0,\
-    'CFG-SBAS-PRNSCANMASK':????,\
+    'CFG-NAVSPG-DYNMODEL':4,
+    'CFG-RATE-MEAS':100,
+    'CFG-SBAS-USE_TESTMODE':1,
+    'CFG-SBAS-USE_RANGING':0,
+    'CFG-SBAS-PRNSCANMASK':3145760,
     'CFG-SIGNAL-SBAS_ENA':1
-    }
+    },
     'gpsd':{
-        
+        'TPV':{
+            'lat':None,
+            'lon':None,
+            'device':None,
+            'mode':None,
+            'status':None,
+            'altHAE':None,
+            'speed':None,
+            'eph':None
+        },
+        'SKY':{
+            'hdop':None
+        }
     }
 }
 
-host_ip = '127.0.0.1'
-database = 1
-user_name = None
-user_password = None
-host_port = 6379
-s_t = None
+redis_connection = {'host':'127.0.0.1',
+'db':1,
+'password':None,
+'port':6379,
+'socket_timeout':None
+}
+
 os.system('clear') #clear the terminal (optional)
 
 class GpsPoller(threading.Thread):
@@ -77,14 +91,8 @@ class ubx_to_redis(threading.Thread):
         threading.Thread.__init__(self)
     def run(self):
         while True:# gps_thread.running:
-            items = ['CFG-NAVSPG-DYNMODEL',\
-                        'CFG-RATE-MEAS',\
-                        'CFG-SBAS-USE_TESTMODE',\
-                        'CFG-SBAS-USE_RANGING',\
-                        'CFG-SBAS-PRNSCANMASK',\
-                        'CFG-SIGNAL-SBAS_ENA']
-            for item in items:
-                print('\n',item, '\n')
+            for item in list(redis_defaults['ubxtool'].keys()):
+                #print('\n',item, '\n')
                 a = run(self.ubx_get_item(item))
                 b = re.findall('UBX-CFG-VALGET:\\n version \d layer \d position \d\\n  layers \(\w*\)\\n    item {}/0x\d* val \d*'.format(item), a.decode('utf-8'))
                 for c in b:
@@ -93,22 +101,22 @@ class ubx_to_redis(threading.Thread):
         return 'ubxtool -P 27.12 -g {}'.format(item)
 
 def run(command):
-    print(command)
+    #print(command)
     p = subprocess.Popen(command, shell = True, stdout = subprocess.PIPE)
     (output, err) = p.communicate()
     p_status =  p.wait()
-    print(output.decode('utf-8'))
+    #print(output.decode('utf-8'))
     return output
 
 def get_from_buffer(type):
     global satellites
     if type == "TPV":
-        for field in fields_TPV:
+        for field in list(redis_defaults['gpsd']['TPV'].keys()):
             result = getattr(report, field, 'Unknown')
             #print(field, ": ",result)
             redis_client.set(field,str(result))
     elif type == "SKY":
-        for field in fields_SKY:
+        for field in list(redis_defaults['gpsd']['SKY'].keys()):
             result = getattr(report, field, 'Unknown')
             #print(field, ": ",result)
             redis_client.set(field,str(result))
@@ -130,11 +138,7 @@ def restart_gpsd():
 
 
 if __name__ == '__main__':
-    redis_client = redis.Redis(host=host_ip,\
-                     password=user_password,\
-                     port=host_port,\
-                     socket_timeout=s_t,\
-                     db=database)
+    redis_client = redis.Redis(**redis_connection)
     gps_thread = GpsPoller() # create the thread
     device_unplug_handler_thread = device_unplug_handler()
     ubx_to_redis_thread = ubx_to_redis()
