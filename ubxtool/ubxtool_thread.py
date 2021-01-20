@@ -23,8 +23,7 @@ class ubx_to_redis(threading.Thread):
                         'CFG-SBAS-USE_TESTMODE',\
                         'CFG-SBAS-USE_RANGING',\
                         'CFG-SBAS-PRNSCANMASK',\
-                        'CFG-SIGNAL-SBAS_ENA',
-                        '']
+                        'CFG-SIGNAL-SBAS_ENA']
             for item in items:
                 print('\n',item, '\n')
                 a = run(self.ubx_get_item(item))
