@@ -90,15 +90,33 @@ class ubx_to_redis(threading.Thread):
     def __init__(self):
         threading.Thread.__init__(self)
     def run(self):
-        while True:# gps_thread.running:
+        while gps_thread.running:# gps_thread.running:
             for item in list(redis_defaults['ubxtool'].keys()):
-                #print('\n',item, '\n')
                 a = run(self.ubx_get_item(item))
-                b = re.findall('UBX-CFG-VALGET:\\n version \d layer \d position \d\\n  layers \(\w*\)\\n    item {}/0x\d* val \d*'.format(item), a.decode('utf-8'))
-                for c in b:
-                    redis_client.hset(item, re.findall('layers \(\w*\)',  c)[0],re.findall('val \d*', c)[0])
+                b = re.search('UBX-CFG-VALGET:\\n version \d layer \d position \d\\n  layers \(ram\)\\n    item {}/0x\d* val \d*'.format(item), a.decode('utf-8'))
+                try:
+                    c = re.findall('val \d*', b.group(0))[0].split(' ')[1]
+                except AttributeError:
+                    print('\n EXCEPTION',a,'\n')
+                    continue
+                if int(c) != redis_defaults['ubxtool'][item]:
+                    print(c, '<--!=-->',redis_defaults['ubxtool'][item])
+                    app = run('ubxtool -P 27.12 -z {},{}'.format(item, redis_defaults['ubxtool'][item]))
+                    if re.sea
     def ubx_get_item(self, item):
         return 'ubxtool -P 27.12 -g {}'.format(item)
+
+class redis_get(threading.Thread):
+    def __init__(self):
+        threading.Thread.__init__(self)
+    def run(self):
+        while gps_thread.running:
+            for item in list(redis_defaults['ubxtool'].keys()):
+                if redis_client.exists(item) != 0:
+                    redis_defaults['ubxtool'][item] = int(redis_client.get(item))
+                elif redis_client.exists(item) == 0:
+                    redis_client.set(item,redis_defaults['ubxtool'][item])
+            time.sleep(2)
 
 def run(command):
     #print(command)
@@ -139,10 +157,12 @@ def restart_gpsd():
 
 if __name__ == '__main__':
     redis_client = redis.Redis(**redis_connection)
+    redis_get_thread = redis_get()
     gps_thread = GpsPoller() # create the thread
     device_unplug_handler_thread = device_unplug_handler()
     ubx_to_redis_thread = ubx_to_redis()
     try:
+        redis_get_thread.start()
         gps_thread.start() # start it up
         device_unplug_handler_thread.start()
         ubx_to_redis_thread.start()
@@ -160,6 +180,7 @@ if __name__ == '__main__':
 
     except (KeyboardInterrupt, SystemExit): #when you press ctrl+c
         print("\nKilling Thread...")
+        redis_get_thread.join()
         gps_thread.running = False
         gps_thread.join() # wait for the thread to finish what it's doing
         device_unplug_handler_thread.join()
