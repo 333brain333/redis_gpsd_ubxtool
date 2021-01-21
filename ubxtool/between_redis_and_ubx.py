@@ -102,7 +102,7 @@ class ubx_to_redis(threading.Thread):
                 if int(c) != redis_defaults['ubxtool'][item]:
                     print(c, '<--!=-->',redis_defaults['ubxtool'][item])
                     app = run('ubxtool -P 27.12 -z {},{}'.format(item, redis_defaults['ubxtool'][item]))
-                    if re.sea
+                    if re.search('UBX-ACK-NAK', )
     def ubx_get_item(self, item):
         return 'ubxtool -P 27.12 -g {}'.format(item)
 
