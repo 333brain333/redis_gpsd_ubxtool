@@ -9,7 +9,7 @@ redis_client = redis.Redis(host='127.0.0.1',\
 redis_defaults = {
     'connection':'not connected',
     'rtk_source':'disabled',
-    'rtk':{
+    'rtk':{``
         'user':None,
         'password':None,
         'server':None,

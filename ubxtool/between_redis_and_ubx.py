@@ -9,11 +9,6 @@ import re
 import os
 
 
-gpsd = None #seting the global variablecute
-report = None
-satellites = None
-
-
 redis_defaults = {
     'connection':'not connected',
     'rtk_source':'disabled',
@@ -63,34 +58,43 @@ os.system('clear') #clear the terminal (optional)
 class GpsPoller(threading.Thread):
     def __init__(self):
         threading.Thread.__init__(self)
-        global gpsd #bring it in scope
-        gpsd = gps(mode=WATCH_ENABLE) #starting the stream of info
-        self.current_value = None
-        self.running = True #setting the thread running to true
+        self.__flag = threading.Event() # The flag used to pause the thread
+        self.__flag.set() # Set to True
+        self.__running = threading.Event() # Used to stop the thread identification
+        self.__running.set() # Set running to True
+        self.gpsd = gps(mode=WATCH_ENABLE) #starting the stream of info
 
     def run(self):
-        global gpsd
-        global report
-        while gps_thread.running:
+        while self.__running.isSet():
+            self.__flag.wait()
             try:
-                report = gpsd.next() #this will continue to loop and grab EACH set of gpsd info to clear the buffer
+                report = self.gpsd.next() #this will continue to loop and grab EACH set of gpsd info to clear the buffer
             except:
                 continue
             try:
                 if report['class'] == 'TPV':
-                    get_from_buffer('TPV')
+                    get_from_buffer('TPV', report)
                 if report['class'] == 'SKY':
-                    get_from_buffer('SKY')
+                    get_from_buffer('SKY', report)
             except (KeyError, TypeError):
                 pass
             time.sleep(0.5) #set to whatever
+    def pause(self):
+        self.__flag.clear()
+    def resume(self):
+        self.__flag.set()
+    def stop(self):
+        self.__flag.clear()
+        self.__running.clear()
+        self.join()
 
 
 
 class device_unplug_handler(threading.Thread):
     def __init__(self):
         threading.Thread.__init__(self)
-        self.running = True
+        
+
     def run(self):
         while device_unplug_handler_thread.running:
             if os.path.isdir('/dev/serial/by-id') ==  True:
@@ -115,12 +119,25 @@ class device_unplug_handler(threading.Thread):
                 redis_client.set('connection','no connection')
                 stop_gpsd.run()
             time.sleep(0.2)
+    def pause(self):
+        self.__flag.clear()
+    def resume(self):
+        self.__flag.set()
+    def stop(self):
+        self.__flag.clear()
+        self.__running.clear()
+        self.join()
 
 class ubx_to_redis(threading.Thread):
     def __init__(self):
         threading.Thread.__init__(self)
+        self.__flag = threading.Event()
+        self.__flag.set()
+        self.__running = threading.Event()
+        self.__running.set()
     def run(self):
-        while gps_thread.running:# gps_thread.running:
+        while self.__running.isSet():# gps_thread.running:
+            self.__flag.wait()
             for item in list(redis_defaults['ubxtool'].keys()):
                 a = run(self.ubx_get_item(item))
                 b = re.search('UBX-CFG-VALGET:\\n version \d layer \d position \d\\n  layers \(ram\)\\n    item {}/0x\d* val \d*'.format(item), a.decode('utf-8'))
@@ -141,12 +158,26 @@ class ubx_to_redis(threading.Thread):
                         redis_client.set(item, c)
     def ubx_get_item(self, item):
         return 'ubxtool -P 27.12 -g {}'.format(item)
+    def pause(self):
+        self.__flag.clear()
+    def resume(self):
+        self.__flag.set()
+    def stop(self):
+        self.__flag.clear()
+        self.__running.clear()
+        self.join()
+    
 
 class redis_get(threading.Thread):
     def __init__(self):
         threading.Thread.__init__(self)
+        self.__flag = threading.Event()
+        self.__flag.set()
+        self.__running = threading.Event()
+        self.__running.set()
     def run(self):
-        while gps_thread.running:
+        while self.__running.isSet():
+            self.__flag.wait()
             for item in list(redis_defaults['ubxtool'].keys()):
                 if redis_client.exists(item) != 0:
                     try:
@@ -163,6 +194,14 @@ class redis_get(threading.Thread):
                     redis_client.set(item, redis_defaults['debug_level'])
             else:
                 redis_client.set('debug_level',redis_defaults['debug_level'])
+    def pause(self):
+        self.__flag.clear()
+    def resume(self):
+        self.__flag.set()
+    def stop(self):
+        self.__flag.clear()
+        self.__running.clear()
+        self.join()
 
 def run(command):
     p = subprocess.Popen(command, shell = True, stdout = subprocess.PIPE)
@@ -180,11 +219,9 @@ def get(data, key):
         return 'Unknown'
     return result
 
-def get_from_buffer(type):
-    global satellites
+def get_from_buffer(type, report):
     if type == "TPV":
         for field in list(redis_defaults['gpsd']['TPV'].keys()):
-            
             result = get(report, field, 'Unknown')
             #print(field, ": ",result)
             redis_client.set(field,str(result))
