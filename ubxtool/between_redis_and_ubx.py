@@ -78,7 +78,7 @@ class GpsPoller(threading.Thread):
                     get_from_buffer('SKY', report)
             except (KeyError, TypeError):
                 pass
-            time.sleep(0.5) #set to whatever
+            #time.sleep(0.5) #set to whatever
     def pause(self):
         self.__flag.clear()
     def resume(self):
@@ -93,28 +93,29 @@ class GpsPoller(threading.Thread):
 class device_unplug_handler(threading.Thread):
     def __init__(self):
         threading.Thread.__init__(self)
-        
+        self.__flag = threading.Event() # The flag used to pause the thread
+        self.__flag.set() # Set to True
+        self.__running = threading.Event() # Used to stop the thread identification
+        self.__running.set() # Set running to True
 
     def run(self):
-        while device_unplug_handler_thread.running:
-            if os.path.isdir('/dev/serial/by-id') ==  True:
-                a = subprocess.run('ls /dev/serial/by-id',shell = True, stdout=subprocess.PIPE)
-                try:
-                    re.search('usb-u-blox_AG_C099__ZED-F9P_DBTMNKT0-if00-port0', a.stdout.decode('utf-8')).group(0)
+        while self.__running.isSet():
+            self.__flag.wait()
+            if os.path.exists('/dev/serial/by-id/usb-u-blox_AG_C099__ZED-F9P_DBTMNKT0-if00-port0'):
                     redis_client.set('connection', 'connected')
-                    time.sleep(1)
-                    gps_thread.running = True
-                    
                     start_gpsd.run()
-
-
-                except AttributeError:
-                    gps_thread.running = False
-                    print('No devices connected')
-                    redis_client.set('connection','no connection')
-                    stop_gpsd.run()
+                    output = run('systemctl status gpsd').split('\n')[-2:-1]
+                    if len(re.findall('gpsd:ERROR:', output[0]))>0:
+                        stop_gpsd.run()
+                        time.sleep(2)
+                        start_gpsd.run()
+                    redis_get_thread.resume()
+                    gps_thread.resume() # start it up
+                    ubx_to_redis_thread.resume()
             else:
-                gps_thread.running = False
+                redis_get_thread.pause()
+                gps_thread.pause() # start it up
+                ubx_to_redis_thread.pause()
                 print('No devices connected')
                 redis_client.set('connection','no connection')
                 stop_gpsd.run()
@@ -140,7 +141,7 @@ class ubx_to_redis(threading.Thread):
             self.__flag.wait()
             for item in list(redis_defaults['ubxtool'].keys()):
                 a = run(self.ubx_get_item(item))
-                b = re.search('UBX-CFG-VALGET:\\n version \d layer \d position \d\\n  layers \(ram\)\\n    item {}/0x\d* val \d*'.format(item), a.decode('utf-8'))
+                b = re.search('UBX-CFG-VALGET:\\n version \d layer \d position \d\\n  layers \(ram\)\\n    item {}/0x\d* val \d*'.format(item), a)
                 try:
                     c = re.findall('val \d*', b.group(0))[0].split(' ')[1]
                 except AttributeError:
@@ -150,7 +151,7 @@ class ubx_to_redis(threading.Thread):
                     print(c, '<--!=-->',redis_defaults['ubxtool'][item])
                     app = run('ubxtool -P 27.12 -z {},{}'.format(item, redis_defaults['ubxtool'][item]))
                     try:
-                        if re.findall('UBX-ACK-\w*', app.decode('utf-8'))[0] == 'UBX-ACK-NAK':
+                        if re.findall('UBX-ACK-\w*', app)[0] == 'UBX-ACK-NAK':
                             redis_defaults['ubxtool'][item] = int(c)
                             redis_client.set(item, c)
                     except IndexError:
@@ -211,7 +212,8 @@ def run(command):
         print(command)
         redis_client.set('log', output.decode('utf-8'))
     #print(output.decode('utf-8'))
-    return output
+    return output.decode('utf-8')
+
 def get(data, key):
     try:
         result = getattr(data, key, 'Unknown')
@@ -222,12 +224,12 @@ def get(data, key):
 def get_from_buffer(type, report):
     if type == "TPV":
         for field in list(redis_defaults['gpsd']['TPV'].keys()):
-            result = get(report, field, 'Unknown')
+            result = get(report, field)
             #print(field, ": ",result)
             redis_client.set(field,str(result))
     elif type == "SKY":
         for field in list(redis_defaults['gpsd']['SKY'].keys()):
-            result = get(report, field, 'Unknown')
+            result = get(report, field)
             #print(field, ": ",result)
             redis_client.set(field,str(result))
         satellites = get(report, 'satellites')
@@ -244,8 +246,7 @@ class start_gpsd_class():
         if self.counter > 0:
             print('Starting gpsd')
             time.sleep(2)
-            subprocess.run('echo andrew | sudo -S systemctl start gpsd',\
-                    shell = True, check =True)
+            run('echo andrew | sudo -S systemctl start gpsd')
             self.counter = 0
             stop_gpsd.counter = 1
 class stop_gpsd_class():
@@ -255,17 +256,16 @@ class stop_gpsd_class():
         if self.counter > 0:
             print('Stoping gpsd')
             time.sleep(2)
-            subprocess.run('echo andrew | sudo -S systemctl stop gpsd',\
-                    shell = True, check =True)
+            run('echo andrew | sudo -S systemctl stop gpsd')
             self.counter = 0
             start_gpsd.counter = 1
-start_gpsd = start_gpsd_class()
-stop_gpsd = stop_gpsd_class()
+
 
 if __name__ == '__main__':
+    redis_client = redis.Redis(**redis_connection)
     stop_gpsd = stop_gpsd_class()
     start_gpsd = start_gpsd_class()
-    redis_client = redis.Redis(**redis_connection)
+    #threads:
     redis_get_thread = redis_get()
     gps_thread = GpsPoller() # create the thread
     device_unplug_handler_thread = device_unplug_handler()
@@ -276,14 +276,13 @@ if __name__ == '__main__':
         device_unplug_handler_thread.start()
         ubx_to_redis_thread.start()
 
-
     except (KeyboardInterrupt, SystemExit): #when you press ctrl+c
         print("\nKilling Thread...")
-        redis_get_thread.join()
-        gps_thread.running = False
-        gps_thread.join() # wait for the thread to finish what it's doing
-        device_unplug_handler_thread.join()
-    print("Done.\nExiting.")
+        redis_get_thread.stop()
+        gps_thread.stop() # wait for the thread to finish what it's doing
+        device_unplug_handler_thread.stop()
+        ubx_to_redis_thread.stop()
+   # print("Done.\nExiting.")
 
 
 
