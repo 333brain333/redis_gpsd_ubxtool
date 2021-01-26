@@ -107,7 +107,6 @@ class device_unplug_handler(threading.Thread):
                     output = run('systemctl status gpsd').split('\n')[-2:-1]
                     if len(re.findall('gpsd:ERROR:', output[0]))>0:
                         stop_gpsd.run()
-                        time.sleep(2)
                         start_gpsd.run()
                     redis_get_thread.resume()
                     gps_thread.resume() # start it up
@@ -245,8 +244,8 @@ class start_gpsd_class():
     def run(self):
         if self.counter > 0:
             print('Starting gpsd')
-            time.sleep(2)
             run('echo andrew | sudo -S systemctl start gpsd')
+            time.sleep(2)
             self.counter = 0
             stop_gpsd.counter = 1
 class stop_gpsd_class():
@@ -255,8 +254,8 @@ class stop_gpsd_class():
     def run(self):
         if self.counter > 0:
             print('Stoping gpsd')
-            time.sleep(2)
             run('echo andrew | sudo -S systemctl stop gpsd')
+            time.sleep(2)
             self.counter = 0
             start_gpsd.counter = 1
 
