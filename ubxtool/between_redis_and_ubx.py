@@ -14,11 +14,11 @@ redis_defaults = {
     'connection':'not connected',
     'rtk_source':'disabled',
     'rtk':{
-        'user':None,
-        'password':None,
-        'server':None,
-        'port':None,
-        'stream':None
+        'user':'Unknown',
+        'password':'Unknown',
+        'server':'Unknown',
+        'port':'Unknown',
+        'stream':'Unknown'
     },
     'ubxtool':{
     'CFG-NAVSPG-DYNMODEL':4,
@@ -34,7 +34,6 @@ redis_defaults = {
             'lon':None,
             'device':None,
             'mode':None,
-            'status':None,
             'altHAE':None,
             'speed':None,
             'eph':None,
@@ -50,7 +49,8 @@ redis_connection = {'host':'127.0.0.1',
 'db':1,
 'password':None,
 'port':6379,
-'socket_timeout':None
+'socket_timeout':None,
+'decode_responses':True
 }
 
 os.system('clear') #clear the terminal (optional)
@@ -195,6 +195,35 @@ class redis_get(threading.Thread):
                         redis_client.set(item, redis_defaults['ubxtool'][item])
                 elif redis_client.exists(item) == 0:
                     redis_client.set(item,redis_defaults['ubxtool'][item])
+                #RTK_connection_params
+            if redis_client.exists('rtk') != 0:
+                try:
+                    redis_defaults['rtk'] = redis_client.hgetall('rtk')
+                except ValueError:
+                    redis_client.hmset('rtk', redis_defaults['rtk'])
+            elif redis_client.exists('rtk') == 0:
+                redis_client.hmset('rtk', redis_defaults['rtk'])
+                #RTK_source
+            if redis_client.exists('rtk_source') != 0:
+                try:
+                    if redis_defaults['rtk_source'] != redis_client.get('rtk_source'):
+                        redis_defaults['rtk_source'] = redis_client.get('rtk_source')
+                        if redis_defaults['rtk_source'] == 'internet':
+                            stop_gpsd.run()
+                            time.sleep(4)
+                            print('changing...')
+                            run(r'echo GPSD_OPTIONS=\"ntrip://{}:{}@{}:{}/{}\" > /home/andrew/gpsd'.format(redis_defaults['rtk']['user'],redis_defaults['rtk']['password'],redis_defaults['rtk']['server'],redis_defaults['rtk']['port'],redis_defaults['rtk']['stream']))
+                            start_gpsd.run()
+                        if redis_defaults['rtk_source'] == 'disable':
+                            stop_gpsd.run()
+                            print('changing...')
+                            run(r'echo GPSD_OPTIONS=\"\" > /home/andrew/gpsd')
+                            start_gpsd.run()
+                except ValueError:
+                    redis_client.set('rtk_source',redis_defaults['rtk_source']) 
+            elif redis_client.exists('rtk_source') == 0:
+                redis_client.set('rtk_source',redis_defaults['rtk_source'])   
+
             time.sleep(2)
     def pause(self):
         self.__flag.clear()
@@ -256,7 +285,7 @@ class start_gpsd_class():
         self.counter = 1
     def run(self):
         if self.counter > 0:
-            #print('Starting gpsd')
+            print('Starting gpsd')
             syslog.syslog(syslog.LOG_INFO,'Starting GPSD')
             run(r'echo andrew | sudo -S systemctl start gpsd')
             time.sleep(2)
@@ -267,7 +296,7 @@ class stop_gpsd_class():
         self.counter = 1
     def run(self):
         if self.counter > 0:
-            #print('Stopping gpsd')
+            print('Stopping gpsd')
             syslog.syslog(syslog.LOG_INFO,'Stopping GPSD')
             run(r'echo andrew | sudo -S systemctl stop gpsd')
             time.sleep(2)
@@ -284,10 +313,11 @@ if __name__ == '__main__':
     gps_thread = GpsPoller() # create the thread
     device_unplug_handler_thread = device_unplug_handler()
     ubx_to_redis_thread = ubx_to_redis()
+
     try:
+        device_unplug_handler_thread.start()
         redis_get_thread.start()
         gps_thread.start() # start it up
-        device_unplug_handler_thread.start()
         ubx_to_redis_thread.start()
 
     except (KeyboardInterrupt, SystemExit): #when you press ctrl+c
