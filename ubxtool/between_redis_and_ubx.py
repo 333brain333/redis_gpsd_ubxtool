@@ -303,9 +303,39 @@ class stop_gpsd_class():
             self.counter = 0
             start_gpsd.counter = 1
 
+class redis_client_class(redis.Redis):
+    def __init__(self, *args, **kwargs):
+        redis.Redis.__init__(self, *args, **kwargs)
+    def set(self, a, b):
+        try:
+            super().set(a, b)
+        except:
+            syslog.syslog(syslog.LOG_ERR, 'can\'t set: "{}" in redis db'.format(a))
+    def exists(self, a):
+        try:
+            super().exists(a)
+        except:
+            syslog.syslog(syslog.LOG_ERR, 'can\'t check presence of "{}"'.format(a))
+    def get(self, a):
+        try:
+            super().get(a, b)
+        except:
+            syslog.syslog(syslog.LOG_ERR, 'can\'t get: "{}" in redis db'.format(a))
+    def hgetall(self, a):
+        try:
+            super().hgetall(a)
+        except:
+            syslog.syslog(syslog.LOG_ERR, 'can\'t hgetall: "{}" in redis db'.format(a))
+    def hmset(self, a, b):
+        try:
+            super().hmset(a, b)
+        except:
+            syslog.syslog(syslog.LOG_ERR, 'can\'t hmset: "{}" in redis db'.format(a))
+
 
 if __name__ == '__main__':
-    redis_client = redis.Redis(**redis_connection)
+    #redis_client = redis.Redis(**redis_connection) # connect to redis server
+    redis_client = redis_client_class(**redis_connection)
     stop_gpsd = stop_gpsd_class()
     start_gpsd = start_gpsd_class()
     #threads:
