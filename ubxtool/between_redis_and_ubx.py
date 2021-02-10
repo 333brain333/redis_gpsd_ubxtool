@@ -107,7 +107,7 @@ class device_unplug_handler(threading.Thread):
                 redis_client.set('connection', 'connected')
                 start_gpsd.run()
                 output = run('systemctl status gpsd').split('\n')[-2:-1]
-                if len(re.findall('gpsd:ERROR:', output[0]))>0:
+                if len(re.findall('gpsd:ERROR: SER:', output[0]))>0:
                     #print('GPSD can\'t connect to device, restarting GPSD')
                     syslog.syslog(syslog.LOG_ERR, 'GPSD can\'t connect to device, restarting GPSD')
                     stop_gpsd.run()
@@ -214,7 +214,7 @@ class redis_get(threading.Thread):
                             print('changing...')
                             run(r'echo GPSD_OPTIONS=\"ntrip://{}:{}@{}:{}/{}\" > /home/andrew/gpsd'.format(redis_defaults['rtk']['user'],redis_defaults['rtk']['password'],redis_defaults['rtk']['server'],redis_defaults['rtk']['port'],redis_defaults['rtk']['stream']))
                             start_gpsd.run()
-                        if redis_defaults['rtk_source'] == 'disable':
+                        if redis_defaults['rtk_source'] == 'disabled':
                             stop_gpsd.run()
                             print('changing...')
                             run(r'echo GPSD_OPTIONS=\"\" > /home/andrew/gpsd')
@@ -305,6 +305,7 @@ class stop_gpsd_class():
 
 
 if __name__ == '__main__':
+    run(r'echo GPSD_OPTIONS=\"\" > /home/andrew/gpsd')
     redis_client = redis.Redis(**redis_connection)
     stop_gpsd = stop_gpsd_class()
     start_gpsd = start_gpsd_class()
