@@ -13,3 +13,5 @@ This will limit syslog to 100MB
 
 Issues:
 - by commit e493b5f2677fb3290da01c0d2e3a40e4889b4a1a script falls after start in case of redis server doesn't running. And falls in working mode if redis server stoped working. 
+
+Page in Confluence about gpsd: [U-blox zed-f9p](https://confluence.cognitivepilot.com/display/AUTOBOT/U-blox+zed-f9p)
