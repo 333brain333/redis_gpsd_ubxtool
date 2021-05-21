@@ -366,17 +366,17 @@ class redis_client_class(redis.Redis):
             syslog.syslog(syslog.LOG_ERR, 'can\'t set: "{}" in redis db'.format(a))
     def exists(self, a):
         try:
-            super().exists(a)
+            return super().exists(a)
         except:
             syslog.syslog(syslog.LOG_ERR, 'can\'t check presence of "{}"'.format(a))
     def get(self, a):
         try:
-            super().get(a)
+            return super().get(a)
         except:
             syslog.syslog(syslog.LOG_ERR, 'can\'t get: "{}" in redis db'.format(a))
     def hgetall(self, a):
         try:
-            super().hgetall(a)
+            return super().hgetall(a)
         except:
             syslog.syslog(syslog.LOG_ERR, 'can\'t hgetall: "{}" in redis db'.format(a))
     def hmset(self, a, b):
