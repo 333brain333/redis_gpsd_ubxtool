@@ -108,7 +108,7 @@ class GpsPoller(threading.Thread):
             try:
                 report = self.gpsd.next() #this will continue to loop and grab EACH set of gpsd info to clear the buffer
             except:
-                self.gpsd = gps(mode=WATCH_ENABLE)
+                self.gpsd = gps(mode=WATCH_ENABLE) #try to connect to gpsd after service being restarted by another thread
             try:
                 if report['class'] == 'TPV':
                     self.get_from_buffer('TPV', report)
@@ -158,6 +158,7 @@ class device_unplug_handler(threading.Thread):
                     start_gpsd.run()
                     output = run('systemctl status gpsd').split('\n')[-2:-1]
                 if 'gpsd:ERROR: ntrip' in output[0]:
+                    syslog.syslog(syslog.LOG_ERR, 'Wrong RTK NTRIP params')
                     redis_client.set('rtk_source', 'disabled')
                 redis_get_thread.resume()
                 gps_thread.resume() # start it up
