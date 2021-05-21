@@ -157,6 +157,8 @@ class device_unplug_handler(threading.Thread):
                     stop_gpsd.run()
                     start_gpsd.run()
                     output = run('systemctl status gpsd').split('\n')[-2:-1]
+                if 'gpsd:ERROR: ntrip stream' in output[0]:
+                    redis_client.set('rtk_source', 'disabled')
                 redis_get_thread.resume()
                 gps_thread.resume() # start it up
                 ubx_to_redis_thread.resume()
