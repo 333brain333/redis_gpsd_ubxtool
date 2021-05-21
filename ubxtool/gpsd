@@ -1,0 +1,2 @@
+DEVICES=/dev/serial/by-id/usb-u-blox_AG_-_www.u-blox.com_u-blox_GNSS_receiver-if00
+GPSD_OPTIONS=-G -n

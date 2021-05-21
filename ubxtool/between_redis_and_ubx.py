@@ -9,7 +9,7 @@ import re
 import os
 import syslog
 
-zed_f9p = '/dev/serial/by-id/usb-u-blox_AG_C099__ZED-F9P_DBTMNKT0-if00-port0'
+zed_f9p = '/dev/serial/by-id/usb-u-blox_AG_-_www.u-blox.com_u-blox_GNSS_receiver-if00'
 
 redis_defaults = {
     'connection':'not connected',
@@ -105,9 +105,10 @@ class GpsPoller(threading.Thread):
             try:
                 report = self.gpsd.next() #this will continue to loop and grab EACH set of gpsd info to clear the buffer
             except:
-                continue
+                self.gpsd = gps(mode=WATCH_ENABLE)
             try:
                 if report['class'] == 'TPV':
+                    print('tp')
                     self.get_from_buffer('TPV', report)
                 if report['class'] == 'SKY':
                     self.get_from_buffer('SKY', report)
@@ -215,7 +216,7 @@ class ubx_to_redis(threading.Thread):
                         redis_client.set(item, c)
             time.sleep(1)
     def ubx_get_item(self, item):
-        return 'ubxtool -P 27.12 -g {}'.format(item)
+        return 'ubxtool -P 27.12 -g {} 127.0.0.1:2947:{}'.format(item, zed_f9p)
     def pause(self):
         self.__flag.clear()
     def resume(self):
@@ -260,7 +261,7 @@ class redis_get(threading.Thread):
                         redis_defaults['rtk_source'] = redis_client.get('rtk_source')
                         if redis_defaults['rtk_source'] == 'internet':
                             print('changing...')
-                            run('echo DEVICE="{} ntrip://{}:{}@{}:{}/{}"\nGPSD_OPTIONS="-G -n" > /home/andrew/gpsd'\
+                            run('echo DEVICES="{} ntrip://{}:{}@{}:{}/{}""\n"GPSD_OPTIONS="-G -n" > /etc/default/gpsd'\
                                 .format(zed_f9p,\
                                     redis_defaults['rtk']['user'],\
                                     redis_defaults['rtk']['password'],\
@@ -268,10 +269,14 @@ class redis_get(threading.Thread):
                                     redis_defaults['rtk']['port'],\
                                     redis_defaults['rtk']['stream']))
                             time.sleep(2)
+                            gps_thread.pause() # start it up
+                            ubx_to_redis_thread.pause()
                             stop_gpsd.run()
                         if redis_defaults['rtk_source'] == 'disabled':
                             print('changing...')
-                            run(f'echo DEVICE="{zed_f9p}"\nGPSD_OPTIONS="-G -n" > /home/andrew/gpsd')
+                            run(f'echo DEVICES="{zed_f9p}""\n"GPSD_OPTIONS="-G -n" > /etc/default/gpsd')
+                            gps_thread.pause() # start it up
+                            ubx_to_redis_thread.pause()
                             time.sleep(2)
                             stop_gpsd.run()
                 except ValueError:
@@ -293,7 +298,7 @@ def run(command):
     '''
     Starts subprocess and waits untill it exits. Reads stdout after subpocess completes. 
     '''
-    syslog.syslog(syslog.LOG_INFO, 'Subprocess: "' + command + '"')
+    #syslog.syslog(syslog.LOG_INFO, 'Subprocess: "' + command + '"')
 
     try:
         command_line_process = subprocess.Popen(
@@ -308,8 +313,8 @@ def run(command):
 
         syslog.syslog(syslog.LOG_ERR, exception)
         return False
-    else:
-        syslog.syslog(syslog.LOG_INFO, 'Subprocess finished')
+    #else:
+    #    syslog.syslog(syslog.LOG_INFO, 'Subprocess finished')
 
     return process_output.decode('utf-8')
 

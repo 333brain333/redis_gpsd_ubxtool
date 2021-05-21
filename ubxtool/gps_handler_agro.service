@@ -1,0 +1,10 @@
+[Unit]
+Description = this service starts script that handels u-blox GNSS module
+
+[Service]
+ExecStart = /usr/bin/python3 /opt/cognitive/between_redis_and_ubx.py
+Restart = on-failure
+
+[Install]
+WantedBy = multi-user.target
+
