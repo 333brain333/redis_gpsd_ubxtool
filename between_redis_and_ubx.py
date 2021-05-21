@@ -241,23 +241,23 @@ class redis_get(threading.Thread):
             self.__flag.wait()
             #Get values for 'ubxtool' key from redis or pass defaults to redis if they doesn't exists in database
             for item in list(redis_defaults['ubxtool'].keys()):
-                if redis_client.exists(item) != 0:
+                if redis_client.exists(item):
                     try:
                         redis_defaults['ubxtool'][item] = int(redis_client.get(item))
-                    except ValueError, TypeError:
+                    except (ValueError, TypeError):
                         redis_client.set(item, redis_defaults['ubxtool'][item])
-                elif redis_client.exists(item) == 0:
+                else:
                     redis_client.set(item,redis_defaults['ubxtool'][item])
                 #RTK_connection_params
-            if redis_client.exists('rtk') != 0:
+            if redis_client.exists('rtk'):
                 try:
                     redis_defaults['rtk'] = redis_client.hgetall('rtk')
                 except ValueError:
                     redis_client.hmset('rtk', redis_defaults['rtk'])
-            elif redis_client.exists('rtk') == 0:
+            else:
                 redis_client.hmset('rtk', redis_defaults['rtk'])
                 #RTK_source
-            if redis_client.exists('rtk_source') != 0:
+            if redis_client.exists('rtk_source'):
                 try:
                     if redis_defaults['rtk_source'] != redis_client.get('rtk_source'):
                         redis_defaults['rtk_source'] = redis_client.get('rtk_source')
@@ -285,7 +285,7 @@ class redis_get(threading.Thread):
                             stop_gpsd.run()
                 except ValueError:
                     redis_client.set('rtk_source',redis_defaults['rtk_source']) 
-            elif redis_client.exists('rtk_source') == 0:
+            else:
                 redis_client.set('rtk_source',redis_defaults['rtk_source'])   
 
             time.sleep(2)
@@ -373,7 +373,6 @@ class redis_client_class(redis.Redis):
         try:
             super().get(a)
         except:
-            print('NOOOOOOO')
             syslog.syslog(syslog.LOG_ERR, 'can\'t get: "{}" in redis db'.format(a))
     def hgetall(self, a):
         try:
