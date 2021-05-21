@@ -244,7 +244,7 @@ class redis_get(threading.Thread):
                 if redis_client.exists(item) != 0:
                     try:
                         redis_defaults['ubxtool'][item] = int(redis_client.get(item))
-                    except ValueError:
+                    except ValueError, TypeError:
                         redis_client.set(item, redis_defaults['ubxtool'][item])
                 elif redis_client.exists(item) == 0:
                     redis_client.set(item,redis_defaults['ubxtool'][item])
@@ -371,8 +371,9 @@ class redis_client_class(redis.Redis):
             syslog.syslog(syslog.LOG_ERR, 'can\'t check presence of "{}"'.format(a))
     def get(self, a):
         try:
-            super().get(a, b)
+            super().get(a)
         except:
+            print('NOOOOOOO')
             syslog.syslog(syslog.LOG_ERR, 'can\'t get: "{}" in redis db'.format(a))
     def hgetall(self, a):
         try:
