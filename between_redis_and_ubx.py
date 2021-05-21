@@ -8,6 +8,7 @@ import json
 import re
 import os
 import syslog
+import json
 
 zed_f9p = '/dev/serial/by-id/usb-u-blox_AG_-_www.u-blox.com_u-blox_GNSS_receiver-if00'
 
@@ -45,7 +46,9 @@ redis_defaults = {
         }
     }
 }
-
+with open('/etc/cognitive/redis_connection_gpsd.json', 'r') as file:
+    redis_connection = json.load(file)
+'''
 redis_connection = {'host':'127.0.0.1',
 'db':1,
 'password':None,
@@ -53,7 +56,7 @@ redis_connection = {'host':'127.0.0.1',
 'socket_timeout':None,
 'decode_responses':True
 }
-
+'''
 os.system('clear') #clear the terminal (optional)
 
 class GpsPoller(threading.Thread):
@@ -108,7 +111,6 @@ class GpsPoller(threading.Thread):
                 self.gpsd = gps(mode=WATCH_ENABLE)
             try:
                 if report['class'] == 'TPV':
-                    print('tp')
                     self.get_from_buffer('TPV', report)
                 if report['class'] == 'SKY':
                     self.get_from_buffer('SKY', report)
@@ -206,7 +208,7 @@ class ubx_to_redis(threading.Thread):
                 if int(c) != redis_defaults['ubxtool'][item]:
                     #print("Redis has changed {} from {} to {}".format(item,c,redis_defaults['ubxtool'][item]))
                     syslog.syslog(syslog.LOG_ERR, "Redis has changed {} from {} to {}".format(item,c,redis_defaults['ubxtool'][item]))
-                    app = run('ubxtool -P 27.12 -z {},{}'.format(item, redis_defaults['ubxtool'][item]))
+                    app = run('ubxtool -P 27.12 -z {},{} 127.0.0.1:2947:{}'.format(item, redis_defaults['ubxtool'][item], zed_f9p))
                     try:
                         if re.findall('UBX-ACK-\w*', app)[0] == 'UBX-ACK-NAK':
                             redis_defaults['ubxtool'][item] = int(c)
@@ -261,6 +263,7 @@ class redis_get(threading.Thread):
                         redis_defaults['rtk_source'] = redis_client.get('rtk_source')
                         if redis_defaults['rtk_source'] == 'internet':
                             print('changing...')
+                            syslog.syslog(syslog.LOG_INFO,'enabling RTK via internet')
                             run('echo DEVICES="{} ntrip://{}:{}@{}:{}/{}""\n"GPSD_OPTIONS="-G -n" > /etc/default/gpsd'\
                                 .format(zed_f9p,\
                                     redis_defaults['rtk']['user'],\
@@ -274,6 +277,7 @@ class redis_get(threading.Thread):
                             stop_gpsd.run()
                         if redis_defaults['rtk_source'] == 'disabled':
                             print('changing...')
+                            syslog.syslog(syslog.LOG_INFO,'disabling RTK')
                             run(f'echo DEVICES="{zed_f9p}""\n"GPSD_OPTIONS="-G -n" > /etc/default/gpsd')
                             gps_thread.pause() # start it up
                             ubx_to_redis_thread.pause()
@@ -355,7 +359,11 @@ class stop_gpsd_class():
 
 if __name__ == '__main__':
     run(r'echo GPSD_OPTIONS=\"\" > /home/andrew/gpsd')
-    redis_client = redis.Redis(**redis_connection)
+    try:
+        redis_client = redis.Redis(**redis_connection)
+    except:
+        syslog.syslog(syslog.LOG_ERR, "Can't establish connection with redis server")
+        exit(1)
     stop_gpsd = stop_gpsd_class()
     start_gpsd = start_gpsd_class()
     #threads:
