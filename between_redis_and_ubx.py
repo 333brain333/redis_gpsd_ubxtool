@@ -39,6 +39,7 @@ redis_defaults = {
             'altHAE':None,
             'speed':None,
             'eph':None,
+            'status':None,
             'time':None
         },
         'SKY':{
