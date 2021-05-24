@@ -227,7 +227,7 @@ class ubx_to_redis(threading.Thread):
             for item_ in list(redis_defaults['ubxtool'].keys()):
                 item = item_.split(':')[-1:][0]
                 a = run(self.ubx_get_item(item))
-                b = re.search('UBX-CFG-VALGET:\\n version \d layer \d position \d\\n  layers \(ram\)\\n    item {}/0x\d* val \d*'.format(item), a)
+                b = re.search('UBX-CFG-VALGET:\\n version \d layer \d reserved 0,0\\n  layers \(ram\)\\n    item {}/0x\d* val \d*'.format(item), a)
                 try:
                     c = re.findall('val \d*', b.group(0))[0].split(' ')[1]
                 except AttributeError:
@@ -235,7 +235,7 @@ class ubx_to_redis(threading.Thread):
                     syslog.syslog(syslog.LOG_ERR, 'No value in {} from ubxtool'.format(item))
                     continue
                 if int(c) != redis_defaults['ubxtool'][item_]:
-                    #print("Redis has changed {} from {} to {}".format(item,c,redis_defaults['ubxtool'][item]))
+                    print("Redis has changed {} from {} to {}".format(item,c,redis_defaults['ubxtool'][item]))
                     syslog.syslog(syslog.LOG_ERR, "Redis has changed {} from {} to {}".format(item,c,redis_defaults['ubxtool'][item_]))
                     app = run('ubxtool -P 27.12 -z {},{} 127.0.0.1:2947:{}'.format(item, redis_defaults['ubxtool'][item_], zed_f9p))
                     try:
@@ -337,7 +337,7 @@ def run(command):
     '''
     Starts subprocess and waits untill it exits. Reads stdout after subpocess completes. 
     '''
-    #syslog.syslog(syslog.LOG_INFO, 'Subprocess: "' + command + '"')
+    syslog.syslog(syslog.LOG_INFO, 'Subprocess: "' + command + '"')
 
     try:
         command_line_process = subprocess.Popen(
