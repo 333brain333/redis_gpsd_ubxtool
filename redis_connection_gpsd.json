@@ -1,6 +1,6 @@
 {
     "host": "127.0.0.1",
-    "db": 1,
+    "db": 4,
     "password": null,
     "port": 6379,
     "socket_timeout": null,

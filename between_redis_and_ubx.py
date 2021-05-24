@@ -12,43 +12,51 @@ import json
 
 zed_f9p = '/dev/serial/by-id/usb-u-blox_AG_-_www.u-blox.com_u-blox_GNSS_receiver-if00'
 
+
+with open('/etc/cognitive/redis_connection_gpsd.json', 'r') as file:
+    redis_connection = json.load(file)
+
+with open('/etc/cognitive/redis_fields_gpsd.json', 'r') as file:
+    redis_defaults = json.load(file)
+'''
 redis_defaults = {
-    'connection':'not connected',
-    'rtk_source':'disabled',
-    'rtk':{ 
+    'connection':'not connected',  # Shows zed-f9p connection status
+    'rtk_source':'disabled',       # Specify source of RTCM3 corrections 
+    'rtk_connection_params':{                        # RTK connection params. This field is set as hmset (hash table)
         'user':'Unknown',
         'password':'Unknown',
         'server':'Unknown',
         'port':'Unknown',
         'stream':'Unknown'
     },
-    'ubxtool':{ # ubxtool keys can be changed by user thru redis and by ubxtoll as well
-    'CFG-NAVSPG-DYNMODEL':4,
-    'CFG-RATE-MEAS':100,
-    'CFG-SBAS-USE_TESTMODE':1,
-    'CFG-SBAS-USE_RANGING':0,
-    'CFG-SBAS-PRNSCANMASK':3145760,
-    'CFG-SIGNAL-SBAS_ENA':1
+    'ubxtool':{                    # This field is not shown in redis as hmset. It gets flatten. 
+    'CFG-NAVSPG-DYNMODEL':4,       # Sets dynamic platform model to automotive
+    'CFG-RATE-MEAS':100,           # Sets solution output rate to 1000/value
+    'CFG-SBAS-USE_TESTMODE':1,     # Enable sbas test mode 
+    'CFG-SBAS-USE_RANGING':0,      # Disable using sbas for ranging 
+    'CFG-SBAS-PRNSCANMASK':3145760,# SV number to listen to obtain sdcm corrections (125, 140, 141)
+    'CFG-SIGNAL-SBAS_ENA':1        # Turn on SBAS
     },
-    'gpsd':{ # gpsd keys can be changed only by gpsd
-        'TPV':{
-            'lat':None,
-            'lon':None,
-            'device':None,
-            'mode':None,
-            'altHAE':None,
-            'speed':None,
-            'eph':None,
-            'status':None,
-            'time':None
+    'gpsd':{                       # gpsd keys can be changed only by gpsd. This field is not shown in redis as hmset. It gets flatten. 
+        'TPV':{                    # Time Position Velocity data
+            'lat':None,            # Latitude
+            'lon':None,            # Longitude
+            'device':None,         # Device that connected to gpsd
+            'mode':None,           # NMEA mode:0=Unknown,1=no fix,2=2d fix,3=3d fix
+            'status':None,         # GPS fix status: 0=Unknown,1=Normal,2=DGPS,3=RTK Fixed,4=RTK Floating,5=DR,6=GNSSDR,7=Time (surveyed),8=Simulated,9=P(Y)
+            'altHAE':None,         # Altitude, height above ellipsoid, in meters. Probably WGS84.
+            'speed':None,          # Speed over ground, meters per second.
+            'eph':None,            # Estimated horizontal Position (2D) Error in meters. Also known as Estimated Position Error (epe). Certainty unknown.
+            'time':None            # Time/date stamp in ISO8601 format, UTC. May have a fractional part of up to .001sec precision. May be absent if the mode is not 2D or 3D.
         },
         'SKY':{
-            'hdop':None
+            'hdop':None,           # Horizontal dilution of precision, a dimensionless factor which should be multiplied by a base UERE to get a circular error estimate.
+            'nSat':None,           # Number of satellite objects in "satellites" array.
+            'uSat':None            # Number of satellites used in navigation solution.
         }
     }
 }
-with open('/etc/cognitive/redis_connection_gpsd.json', 'r') as file:
-    redis_connection = json.load(file)
+'''
 '''
 redis_connection = {'host':'127.0.0.1',
 'db':1,
@@ -58,7 +66,7 @@ redis_connection = {'host':'127.0.0.1',
 'decode_responses':True
 }
 '''
-os.system('clear') #clear the terminal (optional)
+
 
 class GpsPoller(threading.Thread):
     '''
@@ -86,22 +94,34 @@ class GpsPoller(threading.Thread):
         'gspd' key (lat, lon, device, mode, altHAE, speed, eph, time, hdop) 
         '''
         if type == "TPV":
-            for field in list(redis_defaults['gpsd']['TPV'].keys()):
+            for field_ in list(redis_defaults['gpsd']['TPV'].keys()):
+                field = field_.split(':')[-1:][0]
                 result = self.get(report, field)
                 #print(field, ": ",result)
-                redis_client.set(field,str(result))
+                redis_client.set(field_,str(result))
         elif type == "SKY":
-            for field in list(redis_defaults['gpsd']['SKY'].keys()): # get HDOP
-                result = self.get(report, field)
+            for field_ in list(redis_defaults['gpsd']['SKY'].keys()): # get HDOP
+                field = field_.split(':')[-1:][0]
+                sat_used = 0 #uSat
+                sat_total = 0 #nSat
                 #print(field, ": ",result)
-                redis_client.set(field,str(result))
-            # calculate sattelites count that are used for solution
-            satellites = self.get(report, 'satellites')
-            sat_used = 0
-            for sat in satellites:
-                if sat['used']==True:
-                    sat_used+=1
-            redis_client.set('sat_used',str(sat_used))
+                if field == 'nSat': 
+                    result = self.get(report, 'satellites')
+                    # calculate sattelites count that are used for solution
+                    for sat in result:
+                        if sat['used']==True:
+                            sat_used+=1
+                            sat_total+=1
+                        elif sat['used']==False:
+                            sat_total+=1
+                    redis_client.set(field_,str(sat_total))
+                    continue
+                elif field == 'uSat':
+                    redis_client.set(field_,str(sat_used))
+                    continue
+                result = self.get(report, field)
+                redis_client.set(field_,str(result))
+            
 
     def run(self):
         while self.__running.isSet():
@@ -113,8 +133,10 @@ class GpsPoller(threading.Thread):
             try:
                 if report['class'] == 'TPV':
                     self.get_from_buffer('TPV', report)
-                if report['class'] == 'SKY':
+                elif report['class'] == 'SKY':
                     self.get_from_buffer('SKY', report)
+                elif report['class'] == 'ERROR':
+                    print(report)
             except (KeyError, TypeError):
                 pass
             #time.sleep(0.5) #set to whatever
@@ -148,19 +170,21 @@ class device_unplug_handler(threading.Thread):
             self.__flag.wait()
             if os.path.exists(zed_f9p):#check whether zed-f9p is connected
                 print_flag = 1
-                redis_client.set('connection', 'connected')
+                redis_client.set('GPS:statuses:connection', 'connected')
                 start_gpsd.run()
                 #Check whether the gpsd systemd service started and works properly
                 output = run('systemctl status gpsd').split('\n')[-2:-1]
                 while len(re.findall('gpsd:ERROR: SER:', output[0]))>0:
                     #print('GPSD can\'t connect to device, restarting GPSD')
+                    redis_client.set('GPS:statuses:connection','no connection')
                     syslog.syslog(syslog.LOG_ERR, 'GPSD can\'t connect to device, restarting GPSD')
                     stop_gpsd.run()
                     start_gpsd.run()
                     output = run('systemctl status gpsd').split('\n')[-2:-1]
                 if 'gpsd:ERROR: ntrip' in output[0]:
                     syslog.syslog(syslog.LOG_ERR, 'Wrong RTK NTRIP params')
-                    redis_client.set('rtk_source', 'disabled')
+                    redis_client.set("GPS:statuses:RTK:errors", output[0])
+                    redis_client.set('GPS:settings:RTK:rtk_source', 'disabled')
                 redis_get_thread.resume()
                 gps_thread.resume() # start it up
                 ubx_to_redis_thread.resume()
@@ -172,7 +196,7 @@ class device_unplug_handler(threading.Thread):
                     #print('No devices connected')
                     syslog.syslog(syslog.LOG_ERR, 'No devices connected')
                     print_flag = 0
-                redis_client.set('connection','no connection')
+                redis_client.set('GPS:statuses:connection','no connection')
                 stop_gpsd.run()
             time.sleep(1)
     def pause(self):
@@ -200,7 +224,8 @@ class ubx_to_redis(threading.Thread):
     def run(self):
         while self.__running.isSet():
             self.__flag.wait()
-            for item in list(redis_defaults['ubxtool'].keys()):
+            for item_ in list(redis_defaults['ubxtool'].keys()):
+                item = item_.split(':')[-1:][0]
                 a = run(self.ubx_get_item(item))
                 b = re.search('UBX-CFG-VALGET:\\n version \d layer \d position \d\\n  layers \(ram\)\\n    item {}/0x\d* val \d*'.format(item), a)
                 try:
@@ -209,17 +234,17 @@ class ubx_to_redis(threading.Thread):
                     #print('No value in {} from ubxtool'.format(item))
                     syslog.syslog(syslog.LOG_ERR, 'No value in {} from ubxtool'.format(item))
                     continue
-                if int(c) != redis_defaults['ubxtool'][item]:
+                if int(c) != redis_defaults['ubxtool'][item_]:
                     #print("Redis has changed {} from {} to {}".format(item,c,redis_defaults['ubxtool'][item]))
-                    syslog.syslog(syslog.LOG_ERR, "Redis has changed {} from {} to {}".format(item,c,redis_defaults['ubxtool'][item]))
-                    app = run('ubxtool -P 27.12 -z {},{} 127.0.0.1:2947:{}'.format(item, redis_defaults['ubxtool'][item], zed_f9p))
+                    syslog.syslog(syslog.LOG_ERR, "Redis has changed {} from {} to {}".format(item,c,redis_defaults['ubxtool'][item_]))
+                    app = run('ubxtool -P 27.12 -z {},{} 127.0.0.1:2947:{}'.format(item, redis_defaults['ubxtool'][item_], zed_f9p))
                     try:
                         if re.findall('UBX-ACK-\w*', app)[0] == 'UBX-ACK-NAK':
-                            redis_defaults['ubxtool'][item] = int(c)
-                            redis_client.set(item, c)
+                            redis_defaults['ubxtool'][item_] = int(c)
+                            redis_client.set(item_, c)
                     except IndexError:
-                        redis_defaults['ubxtool'][item] = int(c) 
-                        redis_client.set(item, c)
+                        redis_defaults['ubxtool'][item_] = int(c) 
+                        redis_client.set(item_, c)
             time.sleep(1)
     def ubx_get_item(self, item):
         return 'ubxtool -P 27.12 -g {} 127.0.0.1:2947:{}'.format(item, zed_f9p)
@@ -234,6 +259,10 @@ class ubx_to_redis(threading.Thread):
     
 
 class redis_get(threading.Thread):
+    '''
+    Gets values for 'ubxtool', 'rtk_connection_params','rtk_source' keys from 
+    redis or passes defaults to redis if they doesn't exists in the database
+    '''
     def __init__(self):
         threading.Thread.__init__(self)
         self.__flag = threading.Event()
@@ -241,6 +270,7 @@ class redis_get(threading.Thread):
         self.__running = threading.Event()
         self.__running.set()
     def run(self):
+        redis_client.set("GPS:statuses:RTK:errors", '')
         while self.__running.isSet():
             self.__flag.wait()
             #Get values for 'ubxtool' key from redis or pass defaults to redis if they doesn't exists in database
@@ -253,33 +283,34 @@ class redis_get(threading.Thread):
                 else:
                     redis_client.set(item,redis_defaults['ubxtool'][item])
                 #RTK_connection_params
-            if redis_client.exists('rtk'):
+            if redis_client.exists('GPS:settings:RTK:rtk_connection_params'):
                 try:
-                    redis_defaults['rtk'] = redis_client.hgetall('rtk')
+                    redis_defaults['GPS:settings:RTK:rtk_connection_params'] = redis_client.hgetall('GPS:settings:RTK:rtk_connection_params')
                 except ValueError:
-                    redis_client.hmset('rtk', redis_defaults['rtk'])
+                    redis_client.hmset('GPS:settings:RTK:rtk_connection_params', redis_defaults['GPS:settings:RTK:rtk_connection_params'])
             else:
-                redis_client.hmset('rtk', redis_defaults['rtk'])
+                redis_client.hmset('GPS:settings:RTK:rtk_connection_params', redis_defaults['GPS:settings:RTK:rtk_connection_params'])
                 #RTK_source
-            if redis_client.exists('rtk_source'):
+            if redis_client.exists('GPS:settings:RTK:rtk_source'):
                 try:
-                    if redis_defaults['rtk_source'] != redis_client.get('rtk_source'):
-                        redis_defaults['rtk_source'] = redis_client.get('rtk_source')
-                        if redis_defaults['rtk_source'] == 'internet':
+                    if redis_defaults['GPS:settings:RTK:rtk_source'] != redis_client.get('GPS:settings:RTK:rtk_source'):
+                        redis_defaults['GPS:settings:RTK:rtk_source'] = redis_client.get('GPS:settings:RTK:rtk_source')
+                        if redis_defaults['GPS:settings:RTK:rtk_source'] == 'internet':
+                            redis_client.set("GPS:statuses:RTK:errors", '')
                             print('changing...')
                             syslog.syslog(syslog.LOG_INFO,'enabling RTK via internet')
                             run('echo DEVICES="{} ntrip://{}:{}@{}:{}/{}""\n"GPSD_OPTIONS="-G -n" > /etc/default/gpsd'\
                                 .format(zed_f9p,\
-                                    redis_defaults['rtk']['user'],\
-                                    redis_defaults['rtk']['password'],\
-                                    redis_defaults['rtk']['server'],\
-                                    redis_defaults['rtk']['port'],\
-                                    redis_defaults['rtk']['stream']))
+                                    redis_defaults['GPS:settings:RTK:rtk_connection_params']['user'],\
+                                    redis_defaults['GPS:settings:RTK:rtk_connection_params']['password'],\
+                                    redis_defaults['GPS:settings:RTK:rtk_connection_params']['server'],\
+                                    redis_defaults['GPS:settings:RTK:rtk_connection_params']['port'],\
+                                    redis_defaults['GPS:settings:RTK:rtk_connection_params']['stream']))
                             time.sleep(2)
                             gps_thread.pause() # start it up
                             ubx_to_redis_thread.pause()
                             stop_gpsd.run()
-                        if redis_defaults['rtk_source'] == 'disabled':
+                        if redis_defaults['GPS:settings:RTK:rtk_source'] == 'disabled':
                             print('changing...')
                             syslog.syslog(syslog.LOG_INFO,'disabling RTK')
                             run(f'echo DEVICES="{zed_f9p}""\n"GPSD_OPTIONS="-G -n" > /etc/default/gpsd')
@@ -288,9 +319,9 @@ class redis_get(threading.Thread):
                             time.sleep(2)
                             stop_gpsd.run()
                 except ValueError:
-                    redis_client.set('rtk_source',redis_defaults['rtk_source']) 
+                    redis_client.set('GPS:settings:RTK:rtk_source',redis_defaults['GPS:settings:RTK:rtk_source']) 
             else:
-                redis_client.set('rtk_source',redis_defaults['rtk_source'])   
+                redis_client.set('GPS:settings:RTK:rtk_source',redis_defaults['GPS:settings:RTK:rtk_source'])   
 
             time.sleep(2)
     def pause(self):
@@ -361,6 +392,10 @@ class stop_gpsd_class():
             start_gpsd.counter = 1
 
 class redis_client_class(redis.Redis):
+    '''
+    Class that wraps get, set, etc functions from redis libriary
+    and sends logs to syslog in case of failure
+    '''
     def __init__(self, *args, **kwargs):
         redis.Redis.__init__(self, *args, **kwargs)
     def set(self, a, b):
@@ -391,16 +426,13 @@ class redis_client_class(redis.Redis):
 
 
 if __name__ == '__main__':
-    try:
-        redis_client = redis_client_class(**redis_connection)
-    except:
-        syslog.syslog(syslog.LOG_ERR, "Can't establish connection with redis server")
-        exit(1)
+    os.system('clear') #clear the terminal (optional)
+    redis_client = redis_client_class(**redis_connection)
     stop_gpsd = stop_gpsd_class()
     start_gpsd = start_gpsd_class()
     #threads:
     redis_get_thread = redis_get()
-    gps_thread = GpsPoller() # create the thread
+    gps_thread = GpsPoller()
     device_unplug_handler_thread = device_unplug_handler()
     ubx_to_redis_thread = ubx_to_redis()
 
@@ -416,8 +448,12 @@ if __name__ == '__main__':
         gps_thread.stop() # wait for the thread to finish what it's doing
         device_unplug_handler_thread.stop()
         ubx_to_redis_thread.stop()
+        with open('/etc/cognitive/redis_fields_gpsd.json', 'w') as file:
+            json.dump(redis_defaults, file)
+        #run('journalctl -r -S today -u gps_handler_agro.service >\
+        #     between_redis_and_ubxtool_log.txt')
    # print("Done.\nExiting.")
 
 
 
-###############################################
+##########################THAT'S ALL, FOLKS!##########################
