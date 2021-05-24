@@ -1,16 +1,20 @@
 # File structure of the project:
 
+```
 /opt/cognitive/between_redis_and_ubx.py      # main script
 /etc/default/gpsd                            # defaults options for gpsd.service (zed-f9p port, gpsd app parameters (-G -n))
 /lib/systemd/system/gpsd.socket              # modifyed file for external access to gpsd 
 /lib/systemd/system/gps_handler_agro.service # service that starts main script
 /etc/cognitive/redis_fields_gpsd.json        # redis fileds
 /etc/cognitive/redis_connection_gpsd.json    # redis connection params (ip, port, etc)
+```
+
 
 # Install
 
 To install, download zip archive. Then unzip and run install. After that, make systemd daemon-reload and enable gps_handler_agro service. Here are commands aimed to process those steps:
 
+```
 unzip redis_gpsd_ubxtool-master.zip
 rm redis_gpsd_ubxtool-master.zip
 cd redis_gpsd_ubxtool-master
@@ -18,14 +22,16 @@ cd redis_gpsd_ubxtool-master
 sudo systemctl daemon-reload
 sudo systemctl enable gps_handler_agro.service
 sudo reboot
+```
 
-#Usage
-After install main script will try to connect to resis database, specified in /etc/cognitive/redis_connection_gpsd.json. Also it will wait untill zed-f9p is present in /dev/serial/by-id/. After that main script will iteratively update fileds in redis by interacting with gpsd and ubxtool. All log of the main script is placed in the syslod. One may use next command to obtain logs for today related to main script:
-journalctl -r -S today -u gps_handler_agro.service 
+# Usage
+After install main script will try to connect to resis database, specified in `/etc/cognitive/redis_connection_gpsd.json`. Also it will wait untill zed-f9p is present in `/dev/serial/by-id/`. After that main script will iteratively update fileds in redis by interacting with gpsd and ubxtool. All log of the main script is placed in the syslod. One may use next command to obtain logs for today related to main script:
+`journalctl -r -S today -u gps_handler_agro.service `
 
-##Redis
+## Redis
 Fields description:
 
+```
 'connection':'not connected',  # Shows zed-f9p connection status
 'rtk_source':'disabled',       # Specify source of RTCM3 corrections 
 'rtk':                         # RTK connection params. This field is set as hmset (hash table)
@@ -52,8 +58,11 @@ Fields description:
 'hdop':None,                   # Horizontal dilution of precision, a dimensionless factor which should be multiplied by a base UERE to get a circular error estimate.
 'nSat':None,                   # Number of satellite objects in "satellites" array.
 'uSat':None                    # Number of satellites used in navigation solution.
+```
 
-One may add fields in /etc/cognitive/redis_fields_gpsd into 'gpsd':'TPV' and 'gpsd':'SKY' dictionaries from sheets from https://gpsd.gitlab.io/gpsd/gpsd_json.html#_tpv (table 1 and 2).
 
-#How does main script work
+One may add fields in `/etc/cognitive/redis_fields_gpsd.json` into 'gpsd':'TPV' and 'gpsd':'SKY' dictionaries from sheets from [here](https://gpsd.gitlab.io/gpsd/gpsd_json.html#_tpv)  (table 1 and 2).
+
+# How does main script work
+[Block diagram](https://drive.google.com/file/d/10wcNim_lILBvk0ywDQv9muP-jlHxMEyp/view?usp=sharing)
 
