@@ -114,10 +114,10 @@ class GpsPoller(threading.Thread):
                             sat_total+=1
                         elif sat['used']==False:
                             sat_total+=1
-                    redis_client.set(field_,str(sat_total))
+                    redis_client.set("GPS:statuses:satellites:nSat",str(sat_total))
+                    redis_client.set("GPS:statuses:satellites:uSat",str(sat_used))
                     continue
                 elif field == 'uSat':
-                    redis_client.set(field_,str(sat_used))
                     continue
                 result = self.get(report, field)
                 redis_client.set(field_,str(result))
