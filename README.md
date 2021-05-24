@@ -1,4 +1,4 @@
-#File structure of the project:
+# File structure of the project:
 
 /opt/cognitive/between_redis_and_ubx.py      # main script
 /etc/default/gpsd                            # defaults options for gpsd.service (zed-f9p port, gpsd app parameters (-G -n))
@@ -7,7 +7,7 @@
 /etc/cognitive/redis_fields_gpsd.json        # redis fileds
 /etc/cognitive/redis_connection_gpsd.json    # redis connection params (ip, port, etc)
 
-#Install
+# Install
 
 To install, download zip archive. Then unzip and run install. After that, make systemd daemon-reload and enable gps_handler_agro service. Here are commands aimed to process those steps:
 
