@@ -235,7 +235,7 @@ class ubx_to_redis(threading.Thread):
                     syslog.syslog(syslog.LOG_ERR, 'No value in {} from ubxtool'.format(item))
                     continue
                 if int(c) != redis_defaults['ubxtool'][item_]:
-                    print("Redis has changed {} from {} to {}".format(item,c,redis_defaults['ubxtool'][item]))
+                    #print("Redis has changed {} from {} to {}".format(item,c,redis_defaults['ubxtool'][item_]))
                     syslog.syslog(syslog.LOG_ERR, "Redis has changed {} from {} to {}".format(item,c,redis_defaults['ubxtool'][item_]))
                     app = run('ubxtool -P 27.12 -z {},{} 127.0.0.1:2947:{}'.format(item, redis_defaults['ubxtool'][item_], zed_f9p))
                     try:
