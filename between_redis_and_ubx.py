@@ -337,7 +337,7 @@ def run(command):
     '''
     Starts subprocess and waits untill it exits. Reads stdout after subpocess completes. 
     '''
-    syslog.syslog(syslog.LOG_INFO, 'Subprocess: "' + command + '"')
+    #syslog.syslog(syslog.LOG_INFO, 'Subprocess: "' + command + '"')
 
     try:
         command_line_process = subprocess.Popen(
