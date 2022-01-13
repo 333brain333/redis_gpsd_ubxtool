@@ -1,0 +1,12 @@
+[Unit]
+Description= --- NtripClient trigger ---
+After=multi-user.target
+
+[Service]
+Type=exec
+ExecStart=/usr/bin/python3 /home/agrodroid/ntrip.py
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
