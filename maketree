@@ -10,7 +10,7 @@ args = parser.parse_args()
 cur_dir = os.path.dirname(os.path.abspath(__file__))
 dirs = [
     '/etc/default/',
-    '/lib/systemd/system',
+    '/etc/systemd/system',
     '/opt/cognitive/',
     '/etc/cognitive'
      ]
@@ -18,12 +18,13 @@ dirs = [
 print(f'Current directory: {cur_dir}\nRoot directory:{args.root_dir}\nCreating directories...')
 
 for dir in dirs:
-    call(f'sudo mkdir -p {args.root_dir}{dir}',shell = True)
+    call(f'mkdir -p {args.root_dir}{dir}',shell = True)
 
-call(f'sudo rsync -r {cur_dir}/between_redis_and_ubx.py {args.root_dir}/opt/cognitive/', shell = True)
-call(f'sudo rsync -r {cur_dir}/gpsd {args.root_dir}/etc/default/', shell = True)
-call(f'sudo rsync -r {cur_dir}/redis_connection_gpsd.json {args.root_dir}/etc/cognitive/', shell = True)
-call(f'sudo rsync -r {cur_dir}/gpsd.socket {args.root_dir}/lib/systemd/system/', shell = True)
-call(f'sudo rsync -r {cur_dir}/gps_handler_agro.service {args.root_dir}/lib/systemd/system/', shell = True)
+call(f'rsync -r {cur_dir}/between_redis_and_ubx.py {args.root_dir}/opt/cognitive/', shell = True)
+call(f'rsync -r {cur_dir}/gpsd {args.root_dir}/etc/default/', shell = True)
+call(f'rsync -r {cur_dir}/redis_connection_gpsd.json {args.root_dir}/etc/cognitive/', shell = True)
+call(f'rsync -r {cur_dir}/redis_fields_gpsd.json {args.root_dir}/etc/cognitive/', shell = True)
+call(f'rsync -r {cur_dir}/gpsd.socket {args.root_dir}/etc/systemd/system/', shell = True)
+call(f'rsync -r {cur_dir}/gps_handler_agro.service {args.root_dir}/etc/systemd/system/', shell = True)
 
 #parser.add_argument(action=..., nargs=..., const=..., default=..., type=..., choices=..., required=..., help=..., metavar=..., dest=..., version=...)
