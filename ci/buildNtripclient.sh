@@ -26,8 +26,8 @@ tar -xf ntripclient-${NTRIPCLIENT_VERSION}.tar.gz
 cd ntripclient-${NTRIPCLIENT_VERSION}
 
 make
-mkdir -p ${BUILD_DIR}/ntripclient_bin_pack/
-cp ntripclient ${BUILD_DIR}/ntripclient_bin_pack
+mkdir -p ${BUILD_DIR}/ntripclient_bin_pack/usr/local/bin
+cp ntripclient ${BUILD_DIR}/ntripclient_bin_pack/usr/local/bin
 ################################################################################
 if [ "$USER_ID" != "0" ] || [ "$GROUP_ID" != "0" ]; then
     # change permissions
