@@ -27,7 +27,7 @@ cd ${GPSD_VERSION}
 
 python3 /usr/bin/scons -j8 build target_python=python3 shared=1
 
-export DESTDIR=${BUILD_DIR}/gpsd_bin_pack
+export DESTDIR=${BUILD_DIR}/bin_pack/gpsd
 python3 /usr/bin/scons install
 ################################################################################
 if [ "$USER_ID" != "0" ] || [ "$GROUP_ID" != "0" ]; then

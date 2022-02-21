@@ -1,0 +1,8 @@
+[requires]
+gpsd/3.23.1@cpilot/stable
+ntripclient/1.51@cpilot/stable
+[generators]
+deploy
+[options]
+gpsd:shared=True
+gpsd:build_cgps=True
