@@ -4,7 +4,7 @@ After=multi-user.target
 
 [Service]
 Type=exec
-ExecStart=/usr/bin/python3 /home/agrodroid/ntrip.py
+ExecStart=/usr/bin/python3 /home/agrodroid/releases/active_release/redis_gpsd_ubxtool/ntrip.py
 Restart=on-failure
 RestartSec=10
 

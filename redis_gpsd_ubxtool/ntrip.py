@@ -1,7 +1,7 @@
 import subprocess
 import syslog
 import time
-
+from pathlib import Path
 
 
 def run(command):
@@ -40,4 +40,4 @@ if 'UBX-ACK-ACK' in out:
 else:
     print('NMEA OUT config FAIL')
 time.sleep(1)
-out = run('/home/agrodroid/ntripclient/ntripclient -s 82.202.202.138 -r 2102 -u msc1745 -p 934857 -m ROPS -D /dev/ttyS4 -B 115200 -M 1')
+out = run(Path(__file__).parent.parent / Path('ntripclient/bin/ntripclient'), ' -s 82.202.202.138 -r 2102 -u msc1745 -p 934857 -m ROPS -D /dev/ttyS4 -B 115200 -M 1')

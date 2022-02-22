@@ -1,0 +1,14 @@
+[Unit]
+Description=GPS (Global Positioning System) Daemon
+Requires=cgn_gpsd.socket
+# Needed with chrony SOCK refclock
+After=chronyd.service
+
+[Service]
+Type=forking
+EnvironmentFile=-/home/agrodroid/releases/active_release/redis_gpsd_ubxtool/gpsd_env
+ExecStart=/home/agrodroid/releases/active_release/redis_gpsd_ubxtool/gpsd/sbin/gpsd $GPSD_OPTIONS $DEVICES
+#ExecStart=/usr/local/sbin/gpsd -n -s 230400 /dev/ttyACM0
+[Install]
+WantedBy=multi-user.target
+Also=cgn_gpsd.socket

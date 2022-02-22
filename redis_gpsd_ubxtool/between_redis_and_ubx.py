@@ -9,14 +9,15 @@ import re
 import os
 import syslog
 import json
+from pathlib import Path
 
 zed_f9p = '/dev/serial/by-id/usb-u-blox_AG_-_www.u-blox.com_u-blox_GNSS_receiver-if00'
 
 
-with open('/etc/cognitive/redis_connection_gpsd.json', 'r') as file:
+with open(Path(__file__).parent / Path('redis_connection_gpsd.json'), 'r') as file:
     redis_connection = json.load(file)
 
-with open('/etc/cognitive/redis_fields_gpsd.json', 'r') as file:
+with open(Path(__file__).parent / Path('redis_fields_gpsd.json'), 'r') as file:
     redis_defaults = json.load(file)
 '''
 redis_defaults = {
@@ -299,13 +300,14 @@ class redis_get(threading.Thread):
                             redis_client.set("GPS:statuses:RTK:errors", '')
                             print('changing...')
                             syslog.syslog(syslog.LOG_INFO,'enabling RTK via internet')
-                            run('echo DEVICES="{} ntrip://{}:{}@{}:{}/{}""\n"GPSD_OPTIONS="-G -n" > /etc/default/gpsd'\
+                            run('echo DEVICES="{} ntrip://{}:{}@{}:{}/{}""\n"GPSD_OPTIONS="-G -n" > {}'\
                                 .format(zed_f9p,\
                                     redis_defaults['GPS:settings:RTK:rtk_connection_params']['user'],\
                                     redis_defaults['GPS:settings:RTK:rtk_connection_params']['password'],\
                                     redis_defaults['GPS:settings:RTK:rtk_connection_params']['server'],\
                                     redis_defaults['GPS:settings:RTK:rtk_connection_params']['port'],\
-                                    redis_defaults['GPS:settings:RTK:rtk_connection_params']['stream']))
+                                    redis_defaults['GPS:settings:RTK:rtk_connection_params']['stream'], \
+                                    Path(__file__).parent / Path('gpsd_env') ))
                             time.sleep(2)
                             gps_thread.pause() # start it up
                             ubx_to_redis_thread.pause()
@@ -313,7 +315,7 @@ class redis_get(threading.Thread):
                         if redis_defaults['GPS:settings:RTK:rtk_source'] == 'disabled':
                             print('changing...')
                             syslog.syslog(syslog.LOG_INFO,'disabling RTK')
-                            run(f'echo DEVICES="{zed_f9p}""\n"GPSD_OPTIONS="-G -n" > /etc/default/gpsd')
+                            run(f'echo DEVICES="{zed_f9p}""\n"GPSD_OPTIONS="-G -n" > {Path(__file__).parent / Path("gpsd_env")}')
                             gps_thread.pause() # start it up
                             ubx_to_redis_thread.pause()
                             time.sleep(2)
@@ -448,7 +450,7 @@ if __name__ == '__main__':
         gps_thread.stop() # wait for the thread to finish what it's doing
         device_unplug_handler_thread.stop()
         ubx_to_redis_thread.stop()
-        with open('/etc/cognitive/redis_fields_gpsd.json', 'w') as file:
+        with open(Path(__file__).parent / Path('redis_fields_gpsd.json'), 'w') as file:
             json.dump(redis_defaults, file)
         #run('journalctl -r -S today -u gps_handler_agro.service >\
         #     between_redis_and_ubxtool_log.txt')
