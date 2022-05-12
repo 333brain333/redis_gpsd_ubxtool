@@ -4,9 +4,9 @@ After=multi-user.target
 
 [Service]
 Type=exec
-Environment="PYTHONPATH=/home/agrodroid/releases/release_v0.1.14-15-gf160f89/redis_gpsd_ubxtool/gpsd/lib/python3/dist-packages"
-Environment="PATH=/home/agrodroid/releases/release_v0.1.14-15-gf160f89/redis_gpsd_ubxtool/gpsd/bin/:$PATH"
-ExecStart=/usr/bin/python3 /home/agrodroid/releases/release_v0.1.14-15-gf160f89/redis_gpsd_ubxtool/ntrip.py
+Environment="PYTHONPATH=/home/agrodroid/releases/active_release/redis_gpsd_ubxtool/gpsd/lib/python3/dist-packages"
+Environment="PATH=/home/agrodroid/releases/active_release/redis_gpsd_ubxtool/gpsd/bin/:$PATH"
+ExecStart=/usr/bin/python3 /home/agrodroid/releases/active_release/redis_gpsd_ubxtool/ntrip.py
 Restart=on-failure
 RestartSec=10
 
