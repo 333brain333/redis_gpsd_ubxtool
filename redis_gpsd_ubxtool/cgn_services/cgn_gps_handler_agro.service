@@ -4,7 +4,8 @@ After=multi-user.target
 
 [Service]
 Type=exec
-EnvironmentFile=-/home/agrodroid/releases/active_release/redis_gpsd_ubxtool/pyton_env
+Environment="PYTHONPATH=/home/agrodroid/releases/active_release/redis_gpsd_ubxtool/gpsd/lib/python3/dist-packages"
+Environment="PATH=/home/agrodroid/releases/active_release/redis_gpsd_ubxtool/gpsd/bin/:$PATH"
 ExecStart=/usr/bin/python3 /home/agrodroid/releases/active_release/redis_gpsd_ubxtool/between_redis_and_ubx.py
 Restart=on-failure
 RestartSec=10

@@ -340,6 +340,8 @@ def run(command):
     Starts subprocess and waits untill it exits. Reads stdout after subpocess completes. 
     '''
     #syslog.syslog(syslog.LOG_INFO, 'Subprocess: "' + command + '"')
+    my_env = os.environ.copy()
+    my_env["PATH"] = "/usr/bin/:" + my_env["PATH"]
 
     try:
         command_line_process = subprocess.Popen(
@@ -347,6 +349,7 @@ def run(command):
             shell = True,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
+            env = my_env
         )
         process_output, _ =  command_line_process.communicate()
         #syslog.syslog(syslog.LOG_DEBUG, process_output.decode('utf-8'))
