@@ -6,6 +6,7 @@ After=chronyd.service
 
 [Service]
 Type=forking
+EnvironmentFile=-/home/agrodroid/releases/active_release/redis_gpsd_ubxtool/gpsd_env
 Environment="PYTHONPATH=/home/agrodroid/releases/active_release/redis_gpsd_ubxtool/gpsd/lib/python3/dist-packages"
 Environment="PATH=/home/agrodroid/releases/active_release/redis_gpsd_ubxtool/gpsd/bin/:$PATH"
 ExecStart=/home/agrodroid/releases/active_release/redis_gpsd_ubxtool/gpsd/sbin/gpsd $GPSD_OPTIONS $DEVICES
