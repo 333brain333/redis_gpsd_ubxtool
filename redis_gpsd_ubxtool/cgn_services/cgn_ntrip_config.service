@@ -1,0 +1,13 @@
+[Unit]
+Description= --- Configures RTK functionality ---
+After=multi-user.target
+
+[Service]
+Type=exec
+ExecStart=/usr/bin/python3 /home/agrodroid/releases/active_release/redis_gpsd_ubxtool/ntrip_config.py
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+
