@@ -148,7 +148,16 @@ def run(command:str):
     '''
     #syslog.syslog(syslog.LOG_INFO, 'Subprocess: "' + command + '"')
     my_env = os.environ.copy()
-    my_env["PATH"] = "/usr/bin/:" + my_env["PATH"]
+    if "/usr/bin/" not in my_env["PATH"]:
+        my_env["PATH"] = "/usr/bin/:" + my_env["PATH"]
+    if 'PYTHONPATH' in my_env:
+        if '/ntripclient/lib/python3/dist-packages/' not in my_env['PYTHONPATH']:
+            my_env["PYTHONPATH"] =\
+    f'{str(Path(__file__).parent.resolve() / Path("./ntripclient/lib/python3/dist-packages/"))}:' +\
+                    my_env['PYTHONPATH']
+    else:
+        my_env["PYTHONPATH"] =\
+        f'{str(Path(__file__).parent.resolve() / Path("./ntripclient/lib/python3/dist-packages/"))}'
     try:
         command_line_process = subprocess.Popen(
             command,
@@ -249,7 +258,8 @@ class StartNtrip(Thread):
             #wrong username or passwd
             if "Could not get the requested data: HTTP/1.1 401 Unauthorized"\
                  in stdout_line:
-                self.log_log.error(f"Wrong username/password: >{self.args_dict.username}</>{self.args_dict.password}<")
+                self.log_log.error(
+                f"Wrong username/password: >{self.args_dict.username}</>{self.args_dict.password}<")
                 self.err_queue.insert(ErrCode.NAVRTK002_UNAUTHORIZED.name)
                 self.__flag.clear()
                 self.__flag.wait()
