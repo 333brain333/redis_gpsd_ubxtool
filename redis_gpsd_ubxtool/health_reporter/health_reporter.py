@@ -53,7 +53,7 @@ class HealthReporter:
     def __init__(self, err_source : ErrorSource, redis_host=None, redis_port=None, redis_pssw=None, redis_db=1):
         self.db = redis.StrictRedis(host=redis_host, 
                                     port=redis_port,
-                                    username=None, 
+                                    username=None,
                                     password=redis_pssw, 
                                     db=redis_db, 
                                     decode_responses=True)
