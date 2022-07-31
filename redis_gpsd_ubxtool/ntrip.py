@@ -12,11 +12,14 @@ from logging.handlers import RotatingFileHandler
 import os
 from threading import Thread, Event
 from enum import Enum
+import signal
 from time import sleep, time
 import argparse
 from gps import gps,WATCH_ENABLE
+from ntrip_config import REDIS_HOST
 from setqueue import OrderedSetPriorityQueue
 from health_reporter import Error, ErrorType, ErrorSource, HealthReporter
+
 
 
 class ErrCode(Enum):
@@ -43,6 +46,15 @@ class ErrCode(Enum):
     def __init__(self, id, text):
         self.text = text
         self.err_id = id
+
+class GracefulKiller:
+  kill_now = False
+  def __init__(self):
+    signal.signal(signal.SIGINT, self.exit_gracefully)
+    signal.signal(signal.SIGTERM, self.exit_gracefully)
+
+  def exit_gracefully(self, *args):
+    self.kill_now = True
 
 class LogLog():
     '''
@@ -84,11 +96,15 @@ class ErrReportClass(Thread):
     Health reporter class. Obtains an error from the
     queue and sends keepalives.
     '''
-    def __init__(self, err_queue: OrderedSetPriorityQueue, log_log: LogLog) -> None:
+    def __init__(self,
+    err_queue: OrderedSetPriorityQueue,
+    log_log: LogLog,
+    redis_host='192.168.10.208',
+    redis_port=6379) -> None:
         Thread.__init__(self, daemon=True, name="ErrReport")
         self.log_log = log_log
-        self._redis_host = "192.168.10.208"
-        self._redis_port = 6379
+        self._redis_host = redis_host
+        self._redis_port = redis_port
         self._msg_type = ErrorType.error
         self._msg_source = ErrorSource.GPSservice
         self._error_sender = HealthReporter(self._msg_source, self._redis_host, self._redis_port)
@@ -146,9 +162,6 @@ def run(command:str):
     '''
     Starts subprocess and waits untill it exits. Reads stdout after subpocess completes.
     '''
-    #syslog.syslog(syslog.LOG_INFO, 'Subprocess: "' + command + '"')
-    my_env = os.environ.copy()
-    my_env["PATH"] = "/usr/bin/:" + my_env["PATH"]
     try:
         command_line_process = subprocess.Popen(
             command,
@@ -157,12 +170,9 @@ def run(command:str):
             stderr=subprocess.STDOUT,
         )
         process_output, _ =  command_line_process.communicate()
-        #syslog.syslog(syslog.LOG_DEBUG, process_output.decode('utf-8'))
     except (OSError) as exception:
         logger.error(f'run error {exception}')
         return False
-    #else:
-    #    syslog.syslog(syslog.LOG_INFO, 'Subprocess finished')
     return process_output.decode('utf-8')
 
 
@@ -170,8 +180,6 @@ def run_iter(cmd:str):
     '''
     Runs subprocess and prints outut as soon as a process gives it
     '''
-    my_env = os.environ.copy()
-    my_env["PATH"] = "/usr/bin/:" + my_env["PATH"]
     popen = subprocess.Popen(cmd,
     shell=True,
     stdout=subprocess.PIPE,
@@ -186,7 +194,7 @@ def run_iter(cmd:str):
             continue
         popen.stdout.close()
         return_code = popen.wait()
-        if return_code:
+        if return_code != -15:
             logger.error(f'run iter ERROR: {return_code} {cmd}')
             raise subprocess.CalledProcessError(return_code, cmd)
 
@@ -249,7 +257,8 @@ class StartNtrip(Thread):
             #wrong username or passwd
             if "Could not get the requested data: HTTP/1.1 401 Unauthorized"\
                  in stdout_line:
-                self.log_log.error(f"Wrong username/password: >{self.args_dict.username}</>{self.args_dict.password}<")
+                self.log_log.error(
+                f"Wrong username/password: >{self.args_dict.username}</>{self.args_dict.password}<")
                 self.err_queue.insert(ErrCode.NAVRTK002_UNAUTHORIZED.name)
                 self.__flag.clear()
                 self.__flag.wait()
@@ -336,7 +345,7 @@ class WatchDog(Thread):
         self._counter = 0
     def run(self):
         self._counter = time()
-        while True:
+        while not killer.kill_now:
             #print('self._counter = ', time()-self._counter)
             try:
                 #this will continue to loop and grab EACH set of gpsd info to clear the buffer
@@ -373,6 +382,8 @@ class WatchDog(Thread):
                 self.__flag.clear()
                 self.__flag.wait()
                 os._exit(1)
+        logger.info("finished running ntripclient...")
+        os._exit(0)
     def pause(self):
         '''
         Pauses thread until the resume func will be called
@@ -391,12 +402,13 @@ class WatchDog(Thread):
 if __name__=='__main__':
     try:
         #be caerful with changing an order of the undelying lines
+        killer = GracefulKiller()
         logger = LogLog()
         logger.info("Ntrip.service started")
 
         err_que = OrderedSetPriorityQueue(maxlen = len(ErrCode))
 
-        err_report = ErrReportClass(err_que, logger)
+        err_report = ErrReportClass(err_que, logger, redis_host=REDIS_HOST)
         err_report.start()
         while not err_report.is_alive():
             sleep(1)

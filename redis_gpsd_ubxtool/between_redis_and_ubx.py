@@ -261,7 +261,7 @@ class ubx_to_redis(threading.Thread):
 
 class redis_get(threading.Thread):
     '''
-    Gets values for 'ubxtool', 'rtk_connection_params','rtk_source' keys from 
+    Gets values for 'ubxtool' keys from 
     redis or passes defaults to redis if they doesn't exists in the database
     '''
     def __init__(self):
@@ -283,47 +283,6 @@ class redis_get(threading.Thread):
                         redis_client.set(item, redis_defaults['ubxtool'][item])
                 else:
                     redis_client.set(item,redis_defaults['ubxtool'][item])
-                #RTK_connection_params
-            if redis_client.exists('GPS:settings:RTK:rtk_connection_params'):
-                try:
-                    redis_defaults['GPS:settings:RTK:rtk_connection_params'] = redis_client.hgetall('GPS:settings:RTK:rtk_connection_params')
-                except ValueError:
-                    redis_client.hmset('GPS:settings:RTK:rtk_connection_params', redis_defaults['GPS:settings:RTK:rtk_connection_params'])
-            else:
-                redis_client.hmset('GPS:settings:RTK:rtk_connection_params', redis_defaults['GPS:settings:RTK:rtk_connection_params'])
-                #RTK_source
-            if redis_client.exists('GPS:settings:RTK:rtk_source'):
-                try:
-                    if redis_defaults['GPS:settings:RTK:rtk_source'] != redis_client.get('GPS:settings:RTK:rtk_source'):
-                        redis_defaults['GPS:settings:RTK:rtk_source'] = redis_client.get('GPS:settings:RTK:rtk_source')
-                        if redis_defaults['GPS:settings:RTK:rtk_source'] == 'internet':
-                            redis_client.set("GPS:statuses:RTK:errors", '')
-                            print('changing...')
-                            syslog.syslog(syslog.LOG_INFO,'enabling RTK via internet')
-                            run('echo DEVICES="{} ntrip://{}:{}@{}:{}/{}""\n"GPSD_OPTIONS="-G -n" > {}'\
-                                .format(zed_f9p,\
-                                    redis_defaults['GPS:settings:RTK:rtk_connection_params']['user'],\
-                                    redis_defaults['GPS:settings:RTK:rtk_connection_params']['password'],\
-                                    redis_defaults['GPS:settings:RTK:rtk_connection_params']['server'],\
-                                    redis_defaults['GPS:settings:RTK:rtk_connection_params']['port'],\
-                                    redis_defaults['GPS:settings:RTK:rtk_connection_params']['stream'], \
-                                    Path(__file__).parent / Path('gpsd_env') ))
-                            time.sleep(2)
-                            gps_thread.pause() # start it up
-                            ubx_to_redis_thread.pause()
-                            stop_gpsd.run()
-                        if redis_defaults['GPS:settings:RTK:rtk_source'] == 'disabled':
-                            print('changing...')
-                            syslog.syslog(syslog.LOG_INFO,'disabling RTK')
-                            run(f'echo DEVICES="{zed_f9p}""\n"GPSD_OPTIONS="-G -n" > {Path(__file__).parent / Path("gpsd_env")}')
-                            gps_thread.pause() # start it up
-                            ubx_to_redis_thread.pause()
-                            time.sleep(2)
-                            stop_gpsd.run()
-                except ValueError:
-                    redis_client.set('GPS:settings:RTK:rtk_source',redis_defaults['GPS:settings:RTK:rtk_source']) 
-            else:
-                redis_client.set('GPS:settings:RTK:rtk_source',redis_defaults['GPS:settings:RTK:rtk_source'])   
 
             time.sleep(2)
     def pause(self):

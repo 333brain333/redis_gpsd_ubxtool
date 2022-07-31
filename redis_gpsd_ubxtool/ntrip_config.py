@@ -6,7 +6,7 @@
 # pylint: disable=too-many-instance-attributes
 '''
 Application aimed to pull redis fileds in order to
-maintain cgn_ntrip.service and others
+maintain cgn_escape_ntrip.service and others
 '''
 import logging
 from logging.handlers import RotatingFileHandler
@@ -20,7 +20,13 @@ from pathlib import Path
 import redis
 from setqueue import OrderedSetPriorityQueue
 from health_reporter import Error, ErrorType, ErrorSource, HealthReporter
+try:
+    from Crypto.Cipher import Blowfish
+    from base64 import b64decode
+except ModuleNotFoundError:
+    pass
 
+REDIS_HOST = '192.168.10.208'
 FILENAME = str(Path(__file__).parent.resolve())
 
 class ErrCode(Enum):
@@ -74,11 +80,15 @@ class ErrReportClass(Thread):
     Health reporter class. Obtains an error from the
     queue and sends keepalives.
     '''
-    def __init__(self, err_queue: OrderedSetPriorityQueue, log_log: LogLog) -> None:
+    def __init__(self,
+    err_queue: OrderedSetPriorityQueue,
+    log_log: LogLog,
+    redis_host='192.168.10.208',
+    redis_port=6379) -> None:
         Thread.__init__(self, daemon=True, name="ErrReport")
         self.log_log = log_log
-        self._redis_host = "192.168.10.208"
-        self._redis_port = 6379
+        self._redis_host = redis_host
+        self._redis_port = redis_port
         self._msg_type = ErrorType.error
         self._msg_source = ErrorSource.GPSservice
         self._error_sender = HealthReporter(self._msg_source, self._redis_host, self._redis_port)
@@ -165,18 +175,16 @@ class RedisHandler():
     err_queue: OrderedSetPriorityQueue,
     redis_host='192.168.10.208',
     redis_port=6379,
-    redis_user=None,
     redis_pssw=None,
     redis_db=4):
         self.redis_db = redis.StrictRedis(host=redis_host,
                                     port=redis_port,
-                                    username=redis_user,
+                                    username=None,
                                     password=redis_pssw,
                                     db=redis_db,
                                     decode_responses=True)
         self.switch_channel = "rtk_switch"
         self.err_que = err_queue
-        self.init_config()
 
     def is_connected(self)->bool:
         """
@@ -195,8 +203,19 @@ class RedisHandler():
         '''
         pub/sub handler
         '''
-        if message['data'] == 'RTK':
-            password = self.redis_db.get('GPS:settings:RTK:password')
+        if message['data'] == 'ntrip':
+            logger.info('Ntrip selected')
+            if self.redis_db.get('GPS:settings:RTK:passwordEncryption').lower() == 'on':
+                pass_key = self.redis_db.get('GPS:settings:RTK:password')
+                key, enc_pass = ''.join(list(pass_key)[-7:]),\
+                        ''.join(list(pass_key)[:-7])
+                cipher = Blowfish.new(key)
+                decoded_pass = cipher.decrypt(b64decode(enc_pass))
+                password =\
+                    (decoded_pass[:-int.from_bytes(decoded_pass[-1:], 'big')]).decode('utf-8')
+                print(password)
+            else:
+                password = self.redis_db.get('GPS:settings:RTK:password')
             user = self.redis_db.get('GPS:settings:RTK:user')
             server = self.redis_db.get('GPS:settings:RTK:server')
             port = self.redis_db.get('GPS:settings:RTK:port')
@@ -210,13 +229,19 @@ class RedisHandler():
                  server != '' and\
                    port != '' and\
                  stream != '':
-                logger.info('starting cgn_ntrip.service')
-                run('systemctl start cgn_ntrip.service')
+                logger.info('starting cgn_escape_ntrip.service')
+                run('systemctl start cgn_escape_ntrip.service')
             else:
+                logger.error('no args for the ntripclient')
                 self.err_que.insert(ErrCode.NAVRTK012_MISSING_FIELDS.name)
-        elif message['data'] in ('off','LoRa'):
-            logger.info('stopping cgn_ntrip.service')
-            run('systemctl stop cgn_ntrip.service')
+        elif message['data'] == 'disabled':
+            logger.info('Off selected')
+            logger.info('stopping cgn_escape_ntrip.service')
+            run('systemctl stop cgn_escape_ntrip.service')
+        elif message['data'] == 'lora':
+            logger.info('LoRa selected')
+            logger.info('stopping cgn_escape_ntrip.service')
+            run('systemctl stop cgn_escape_ntrip.service')
 
 
     def init_config(self)->None:
@@ -229,7 +254,7 @@ class RedisHandler():
             sleep(1)
         self.pubsub = self.redis_db.pubsub()
         self.pubsub.subscribe(**{self.switch_channel: self.handler})
-        self.pubsub.run_in_thread(sleep_time=.01)
+        self.pubsub.run_in_thread(sleep_time=1)
 
 
 
@@ -238,9 +263,21 @@ if __name__=='__main__':
         logger = LogLog()
         logger.info("cgn_ntrip_config.service started")
         err_que = OrderedSetPriorityQueue(maxlen = len(ErrCode))
-        err_report = ErrReportClass(err_que, logger)
+        err_report = ErrReportClass(err_que, logger, redis_host=REDIS_HOST)
         err_report.start()
-        redis_client = RedisHandler(err_que)
+        redis_client = RedisHandler(err_que, redis_host=REDIS_HOST)
+        while not redis_client.is_connected():
+            logger.error(f"couldn't connect to the redis server {REDIS_HOST}")
+            sleep(1)
+        if 'Blowfish' in dir():
+            redis_client.redis_db.set('GPS:settings:RTK:passwordEncryption', 'on')
+        else:
+            redis_client.redis_db.set('GPS:settings:RTK:passwordEncryption', 'off')
+        if redis_client.redis_db.get('GPS:settings:RTK:mode') == 'ntrip':
+            logger.info('starting cgn_escape_ntrip.service')
+            run('systemctl start cgn_escape_ntrip.service')
+        sleep(.5)
+        redis_client.init_config()
 
     except (KeyboardInterrupt, SystemExit):
         os._exit(0)
