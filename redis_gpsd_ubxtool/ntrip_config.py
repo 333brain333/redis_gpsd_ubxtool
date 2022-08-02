@@ -6,7 +6,7 @@
 # pylint: disable=too-many-instance-attributes
 '''
 Application aimed to pull redis fileds in order to
-maintain cgn_escape_ntrip.service and others
+maintain cgn_escape_ntrip.service and lora service
 '''
 import logging
 from logging.handlers import RotatingFileHandler
