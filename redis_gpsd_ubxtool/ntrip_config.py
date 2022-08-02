@@ -234,15 +234,18 @@ class RedisHandler(Thread):
         Gets password, username, port, stream, server address
         and runs cgn_escape_ntrip.service
         '''
-        if self.redis_db.get('GPS:settings:RTK:passwordEncryption').lower() == 'on':
-            pass_key = self.redis_db.get('GPS:settings:RTK:password')
-            key, enc_pass = ''.join(list(pass_key)[-7:]),\
-                    ''.join(list(pass_key)[:-7])
-            cipher = Blowfish.new(key)
-            decoded_pass = cipher.decrypt(b64decode(enc_pass))
-            password =\
-                (decoded_pass[:-int.from_bytes(decoded_pass[-1:], 'big')]).decode('utf-8')
-            print(password)
+        if self.redis_db.get('GPS:settings:RTK:passwordEncryption').lower() == 'blowfish':
+            try:
+                pass_key = self.redis_db.get('GPS:settings:RTK:password')
+                key, enc_pass = ''.join(list(pass_key)[-7:]),\
+                        ''.join(list(pass_key)[:-7])
+                cipher = Blowfish.new(key)
+                decoded_pass = cipher.decrypt(b64decode(enc_pass))
+                password =\
+                    (decoded_pass[:-int.from_bytes(decoded_pass[-1:], 'big')]).decode('utf-8')
+            except Exception as exc:
+                logger.error(exc)
+                password = ''
         else:
             password = self.redis_db.get('GPS:settings:RTK:password')
         user = self.redis_db.get('GPS:settings:RTK:user')
@@ -309,7 +312,7 @@ if __name__=='__main__':
                 logger.error(f"couldn't connect to the redis server {REDIS_HOST}")
                 sleep(1)
         if 'Blowfish' in dir():
-            redis_client.redis_db.set('GPS:settings:RTK:passwordEncryption', 'on')
+            redis_client.redis_db.set('GPS:settings:RTK:passwordEncryption', 'blowfish')
         else:
             redis_client.redis_db.set('GPS:settings:RTK:passwordEncryption', 'off')
         if redis_client.redis_db.get('GPS:settings:RTK:mode') == 'ntrip':
