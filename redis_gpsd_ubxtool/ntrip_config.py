@@ -14,6 +14,7 @@ from time import sleep
 from threading import Thread
 import syslog
 import os
+import signal
 import subprocess
 from enum import Enum
 from pathlib import Path
@@ -38,6 +39,15 @@ class ErrCode(Enum):
     def __init__(self, id, text):
         self.text = text
         self.err_id = id
+
+class GracefulKiller:
+  kill_now = False
+  def __init__(self):
+    signal.signal(signal.SIGINT, self.exit_gracefully)
+    signal.signal(signal.SIGTERM, self.exit_gracefully)
+
+  def exit_gracefully(self, *args):
+    self.kill_now = True
 
 class LogLog():
     '''
@@ -166,7 +176,7 @@ def run(command:str):
     return process_output
 
 
-class RedisHandler():
+class RedisHandler(Thread):
     """
     Класс для получения и отправки
     данных через redis
@@ -177,14 +187,34 @@ class RedisHandler():
     redis_port=6379,
     redis_pssw=None,
     redis_db=4):
-        self.redis_db = redis.StrictRedis(host=redis_host,
-                                    port=redis_port,
+        Thread.__init__(self, name = 'RedisHandler')
+        self.redis_host=redis_host
+        self.redis_port=redis_port
+        self.redis_pssw=redis_pssw
+        self.redis_db=redis_db
+        self.redis_db = redis.StrictRedis(host=self.redis_host,
+                                    port=self.redis_port,
                                     username=None,
-                                    password=redis_pssw,
-                                    db=redis_db,
+                                    password=self.redis_pssw,
+                                    db=self.redis_db,
                                     decode_responses=True)
         self.switch_channel = "rtk_switch"
         self.err_que = err_queue
+        self.pubsub = self.redis_db.pubsub()
+        self.pubsub.subscribe(self.switch_channel)
+
+    def reconnect(self):
+        '''
+        Create Redis connection again
+        '''
+        self.redis_db = redis.StrictRedis(host=self.redis_host,
+                                    port=self.redis_port,
+                                    username=None,
+                                    password=self.redis_pssw,
+                                    db=self.redis_db,
+                                    decode_responses=True)
+        self.pubsub = self.redis_db.pubsub()
+        self.pubsub.subscribe(self.switch_channel)
 
     def is_connected(self)->bool:
         """
@@ -199,13 +229,13 @@ class RedisHandler():
             return False
         return True
 
-    def handler(self, message):
+    def run_ntrip(self):
         '''
-        pub/sub handler
+        Gets password, username, port, stream, server address
+        and runs cgn_escape_ntrip.service
         '''
-        if message['data'] == 'ntrip':
-            logger.info('Ntrip selected')
-            if self.redis_db.get('GPS:settings:RTK:passwordEncryption').lower() == 'on':
+        if self.redis_db.get('GPS:settings:RTK:passwordEncryption').lower() == 'blowfish':
+            try:
                 pass_key = self.redis_db.get('GPS:settings:RTK:password')
                 key, enc_pass = ''.join(list(pass_key)[-7:]),\
                         ''.join(list(pass_key)[:-7])
@@ -213,71 +243,85 @@ class RedisHandler():
                 decoded_pass = cipher.decrypt(b64decode(enc_pass))
                 password =\
                     (decoded_pass[:-int.from_bytes(decoded_pass[-1:], 'big')]).decode('utf-8')
-                print(password)
-            else:
-                password = self.redis_db.get('GPS:settings:RTK:password')
-            user = self.redis_db.get('GPS:settings:RTK:user')
-            server = self.redis_db.get('GPS:settings:RTK:server')
-            port = self.redis_db.get('GPS:settings:RTK:port')
-            stream = self.redis_db.get('GPS:settings:RTK:stream')
-            with open(f'{FILENAME}/ntrip_env', 'w') as ntrip_env:
-                ntrip_env.write(
-                f'ARGS={server} {port} {user} {password} {stream}'
-                    )
-            if password != '' and\
-                   user != '' and\
-                 server != '' and\
-                   port != '' and\
-                 stream != '':
-                logger.info('starting cgn_escape_ntrip.service')
-                run('systemctl start cgn_escape_ntrip.service')
-            else:
-                logger.error('no args for the ntripclient')
-                self.err_que.insert(ErrCode.NAVRTK012_MISSING_FIELDS.name)
-        elif message['data'] == 'disabled':
-            logger.info('Off selected')
-            logger.info('stopping cgn_escape_ntrip.service')
-            run('systemctl stop cgn_escape_ntrip.service')
-        elif message['data'] == 'lora':
-            logger.info('LoRa selected')
-            logger.info('stopping cgn_escape_ntrip.service')
-            run('systemctl stop cgn_escape_ntrip.service')
+            except Exception as exc:
+                logger.error(exc)
+                password = ''
+        else:
+            password = self.redis_db.get('GPS:settings:RTK:password')
+        user = self.redis_db.get('GPS:settings:RTK:user')
+        server = self.redis_db.get('GPS:settings:RTK:server')
+        port = self.redis_db.get('GPS:settings:RTK:port')
+        stream = self.redis_db.get('GPS:settings:RTK:stream')
+        with open(f'{FILENAME}/ntrip_env', 'w') as ntrip_env:
+            ntrip_env.write(
+            f'ARGS={server} {port} {user} {password} {stream}'
+                )
+        if password != '' and\
+            user != '' and\
+            server != '' and\
+            port != '' and\
+            stream != '':
+            logger.info('starting cgn_escape_ntrip.service')
+            run('systemctl start cgn_escape_ntrip.service')
+        else:
+            logger.error('no args for the ntripclient')
+            self.err_que.insert(ErrCode.NAVRTK012_MISSING_FIELDS.name)
 
-
-    def init_config(self)->None:
+    def run(self):
         '''
-        subscribe to channel
+        pub/sub handler
         '''
-        while True:
+        while not killer.kill_now:
             if self.is_connected():
-                break
+                try:
+                    message = self.pubsub.get_message()
+                except redis.exceptions.ConnectionError:
+                    self.pubsub = self.redis_db.pubsub()
+                    self.pubsub.subscribe(self.switch_channel)
+                if message:
+                    if message['data'] == 'ntrip':
+                        logger.info('Ntrip selected')
+                        self.run_ntrip()
+                    elif message['data'] == 'disabled':
+                        logger.info('Off selected')
+                        logger.info('stopping cgn_escape_ntrip.service')
+                        run('systemctl stop cgn_escape_ntrip.service')
+                    elif message['data'] == 'lora':
+                        logger.info('LoRa selected')
+                        logger.info('stopping cgn_escape_ntrip.service')
+                        run('systemctl stop cgn_escape_ntrip.service')
+            else:
+                logger.error(f"couldn't connect to the redis server {REDIS_HOST}")
             sleep(1)
-        self.pubsub = self.redis_db.pubsub()
-        self.pubsub.subscribe(**{self.switch_channel: self.handler})
-        self.pubsub.run_in_thread(sleep_time=1)
-
-
+        logger.info("finished running ntrip_config...")
+        os._exit(0)
 
 if __name__=='__main__':
     try:
+        killer = GracefulKiller()
         logger = LogLog()
         logger.info("cgn_ntrip_config.service started")
         err_que = OrderedSetPriorityQueue(maxlen = len(ErrCode))
         err_report = ErrReportClass(err_que, logger, redis_host=REDIS_HOST)
         err_report.start()
-        redis_client = RedisHandler(err_que, redis_host=REDIS_HOST)
-        while not redis_client.is_connected():
-            logger.error(f"couldn't connect to the redis server {REDIS_HOST}")
-            sleep(1)
+        while True:
+            try:
+                redis_client = RedisHandler(err_que, redis_host=REDIS_HOST)
+                break
+            except redis.exceptions.ConnectionError:
+                logger.error(f"couldn't connect to the redis server {REDIS_HOST}")
+                sleep(1)
         if 'Blowfish' in dir():
-            redis_client.redis_db.set('GPS:settings:RTK:passwordEncryption', 'on')
+            redis_client.redis_db.set('GPS:settings:RTK:passwordEncryption', 'blowfish')
         else:
             redis_client.redis_db.set('GPS:settings:RTK:passwordEncryption', 'off')
         if redis_client.redis_db.get('GPS:settings:RTK:mode') == 'ntrip':
             logger.info('starting cgn_escape_ntrip.service')
-            run('systemctl start cgn_escape_ntrip.service')
+            redis_client.run_ntrip()
         sleep(.5)
-        redis_client.init_config()
+        redis_client.start()
 
     except (KeyboardInterrupt, SystemExit):
+        redis_client.join()
+        logger.info("finished running ntrip_config...")
         os._exit(0)

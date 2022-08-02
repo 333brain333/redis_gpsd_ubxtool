@@ -215,7 +215,7 @@ def config_zedf9p(cmd:str, log_log: LogLog)->None:
         sleep(1)
     out = run(cmd)
     if 'UBX-ACK-ACK' in out:
-        log_log.info("baudrate configuration succsessfull")
+        log_log.info("baudrate configuration successfull")
     else:
         log_log.error("baudrate configuration FAIL")
 
@@ -384,6 +384,7 @@ class WatchDog(Thread):
                 os._exit(1)
         logger.info("finished running ntripclient...")
         os._exit(0)
+
     def pause(self):
         '''
         Pauses thread until the resume func will be called
