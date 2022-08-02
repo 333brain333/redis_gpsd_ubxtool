@@ -8,7 +8,7 @@ After=chronyd.service
 Type=forking
 EnvironmentFile=-/home/agrodroid/releases/active_release/redis_gpsd_ubxtool/gpsd_env
 Environment="PYTHONPATH=/home/agrodroid/releases/active_release/redis_gpsd_ubxtool/gpsd/lib/python3/dist-packages"
-Environment="PATH=/home/agrodroid/releases/active_release/redis_gpsd_ubxtool/gpsd/bin/:/usr/bin"
+Environment="PATH=/home/agrodroid/releases/active_release/redis_gpsd_ubxtool/gpsd/bin/:/usr/bin/"
 ExecStart=/home/agrodroid/releases/active_release/redis_gpsd_ubxtool/gpsd/sbin/gpsd $GPSD_OPTIONS $DEVICES
 #ExecStart=/usr/local/sbin/gpsd -n -s 230400 /dev/ttyACM0
 [Install]
