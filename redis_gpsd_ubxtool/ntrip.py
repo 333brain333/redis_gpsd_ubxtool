@@ -13,14 +13,18 @@ import os
 from threading import Thread, Event
 from enum import Enum
 import signal
+import json
 from time import sleep, time
 import argparse
+from tkinter import E
 from gps import gps,WATCH_ENABLE
-from ntrip_config import REDIS_HOST
 from setqueue import OrderedSetPriorityQueue
 from health_reporter import Error, ErrorType, ErrorSource, HealthReporter
 
+ZED_F9P = '/dev/serial/by-id/usb-u-blox_AG_-_www.u-blox.com_u-blox_GNSS_receiver-if00'
 
+with open(Path(__file__).parent / Path('redis_connection_settings.json'), 'r') as file:
+    redis_connection_settings = json.load(file)
 
 class ErrCode(Enum):
     """
@@ -47,14 +51,19 @@ class ErrCode(Enum):
         self.text = text
         self.err_id = id
 
-class GracefulKiller:
-  kill_now = False
-  def __init__(self):
-    signal.signal(signal.SIGINT, self.exit_gracefully)
-    signal.signal(signal.SIGTERM, self.exit_gracefully)
 
-  def exit_gracefully(self, *args):
-    self.kill_now = True
+class GracefulKiller:
+    '''
+    Returns true if programm main process was interrup+ted
+    '''
+    kill_now = False
+    def __init__(self):
+        signal.signal(signal.SIGINT, self.exit_gracefully)
+        signal.signal(signal.SIGTERM, self.exit_gracefully)
+
+    def exit_gracefully(self, *args):
+        self.kill_now = True
+
 
 class LogLog():
     '''
@@ -99,12 +108,11 @@ class ErrReportClass(Thread):
     def __init__(self,
     err_queue: OrderedSetPriorityQueue,
     log_log: LogLog,
-    redis_host='192.168.10.208',
-    redis_port=6379) -> None:
+    **kwargs) -> None:
         Thread.__init__(self, daemon=True, name="ErrReport")
         self.log_log = log_log
-        self._redis_host = redis_host
-        self._redis_port = redis_port
+        self._redis_host = host
+        self._redis_port = port
         self._msg_type = ErrorType.error
         self._msg_source = ErrorSource.GPSservice
         self._error_sender = HealthReporter(self._msg_source, self._redis_host, self._redis_port)
@@ -198,26 +206,63 @@ def run_iter(cmd:str):
             logger.error(f'run iter ERROR: {return_code} {cmd}')
             raise subprocess.CalledProcessError(return_code, cmd)
 
-def config_zedf9p(cmd:str, log_log: LogLog)->None:
+class Ubxtool():
     '''
     Configures zed-f9p with a given command
     and checks the "ACK-ACK" message presense in an
     output
     '''
-    while True:
-        try:
-            #starting the stream of info
-            gps(mode=WATCH_ENABLE)
-            break
-        except ConnectionRefusedError:
-            log_log.error("Config: no gpsd running")
-            err_que.insert(ErrCode.NAVRTK011_NO_GPSD.name)
-        sleep(1)
-    out = run(cmd)
-    if 'UBX-ACK-ACK' in out:
-        log_log.info("baudrate configuration successfull")
-    else:
-        log_log.error("baudrate configuration FAIL")
+
+    def __init__(self, log_log: LogLog, err_que: OrderedSetPriorityQueue) -> None:
+        self.log_log = log_log
+        self.err_que = err_que
+
+    def check_gpsd_connection(self)->bool:
+        '''
+        Returns true if gpsd is attached to the GNSS module
+        '''
+        if self.set('CFG-UART1-BAUDRATE','115200'):
+            return True
+        return False
+
+    def get(self, pos: str)->bool:
+        '''
+        Obtains value on the RAM layer of the given position
+        '''
+        while True:
+            result = run(f'ubxtool -g {pos} 127.0.0.1:2947:{ZED_F9P}').split('\n\n')
+            for out in result:
+                if 'UBX-CFG-VALGET' in out\
+                    and 'layers (ram)' in out\
+                    and pos in out:
+                    return out.split()[-1:][0]
+                if 'no devices attached' in out:
+                    self.log_log.error(f"{pos} FAIL. No devices attached")
+                    return False
+                if 'Connection refused' in out:
+                    self.log_log.error('ubxtool: no gpsd running')
+                    self.err_que.insert(ErrCode.NAVRTK011_NO_GPSD.name)
+                sleep(1)
+
+    def set(self, pos: str, value: int)->bool:
+        '''
+        Sets value by its position
+        '''
+        while True:
+            out = run(f'ubxtool -z {pos},{value} 127.0.0.1:2947:{ZED_F9P}')
+            if 'UBX-ACK-ACK' in out:
+                return True
+            if 'UBX-ACK-NAK' in out:
+                self.log_log.error(f"{pos},{value} FAIL")
+                return False
+            if 'no devices attached' in out:
+                self.log_log.error(f"{pos} FAIL. No devices attached")
+                return False
+            if 'Connection refused' in out:
+                self.log_log.error('ubxtool: no gpsd running')
+                self.err_que.insert(ErrCode.NAVRTK011_NO_GPSD.name)
+            sleep(1)
+
 
 
 class StartNtrip(Thread):
@@ -409,7 +454,7 @@ if __name__=='__main__':
 
         err_que = OrderedSetPriorityQueue(maxlen = len(ErrCode))
 
-        err_report = ErrReportClass(err_que, logger, redis_host=REDIS_HOST)
+        err_report = ErrReportClass(err_que, logger, **redis_connection_settings)
         err_report.start()
         while not err_report.is_alive():
             sleep(1)
@@ -429,9 +474,8 @@ if __name__=='__main__':
 
         start_ntrip = StartNtrip(err_que, logger, **vars(args))
 
-        CONFIG_BAUDRATE = 'ubxtool -z CFG-UART1-BAUDRATE,115200\
-        127.0.0.1:2947:/dev/serial/by-id/usb-u-blox_AG_-_www.u-blox.com_u-blox_GNSS_receiver-if00'
-        config_zedf9p(CONFIG_BAUDRATE, logger)
+        ubxtool = Ubxtool(logger, err_que)
+        ubxtool.set('CFG-UART1-BAUDRATE', 115200)
 
         logger.info("running ntripclient...")
         start_ntrip.start()

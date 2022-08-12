@@ -15,6 +15,8 @@ class ErrorType(enum.Enum):
     silent_error     = (3, "silent_error")
     # ворнинг который не будет выведен у клиента, но ляжет в базу, телеметрию
     silent_warning   = (4, "silent_warning")
+    # сообщение-уведомление, которое не сохраняется в историю
+    event            = (5, "event")
 
     def __init__(self, id, text):
         self.text = text
@@ -32,7 +34,6 @@ class ErrorSource(enum.Enum):
     GPSservice     = (5, "GPS-service")
     CANdevices     = (6, "CAN-devices")
     JetsonHardware = (7, "jetson hardware")
-    NavRTK         = (8, "RTK navigational")
 
     def __init__(self, id, text):
         self.text = text
@@ -57,6 +58,7 @@ class HealthReporter:
                                     password=redis_pssw, 
                                     db=redis_db, 
                                     decode_responses=True)
+        self.pubsub = self.db.pubsub()
         self.keepalives_channel = "keepalives"
         self.errors_channel = "raw_errors"
         self.source = err_source
@@ -93,7 +95,10 @@ class HealthReporter:
         """
         Сообщить keepalive от данного source
         """
-        self.db.publish(self.keepalives_channel, self.source.text)
+        try:
+            self.db.publish(self.keepalives_channel, self.source.text)
+        except redis.exceptions.ConnectionError:
+            pass
         self.last_keepalive_cycle_ts = time.time()
         return
 
@@ -114,7 +119,13 @@ class HealthReporter:
         "error_code" : error.code
         }
         error_str = json.dumps(data_dict)
-        self.db.publish("raw_errors", error_str)
+        try:
+            if error.type == ErrorType.event:
+                self.db.publish("error_notifications", error_str)
+            else:
+                self.db.publish("raw_errors", error_str)
+        except redis.exceptions.ConnectionError:
+            pass
 
 
     def initConfig(self):
@@ -122,14 +133,13 @@ class HealthReporter:
             return False
         keepalive_cycle = self.db.get("health_monitor_cfg:reporter_cycle_sec")
         if keepalive_cycle:
-            self.keepalive_cycle_sec = int(keepalive_cycle) 
+            self.keepalive_cycle_sec = int(keepalive_cycle)
         self.last_keepalive_cycle_ts = time.time()
 
         self.__checkRedisConfigReady()
 
-        self.pubsub = self.db.pubsub()
-        self.pubsub.subscribe(**{"config_ready": self.__checkRedisConfigReady})
-        self.pubsub.run_in_thread(sleep_time=.01, daemon=True)
+        self.pubsub.subscribe('config_ready')
+        threading.Thread(target=self.checkRedisConfigReady, daemon=True)
         return True
 
 
@@ -140,15 +150,27 @@ class HealthReporter:
         try:
             self.db.ping()
         except (redis.exceptions.TimeoutError, redis.connection.socket.timeout,
-                redis.exceptions.ConnectionError, ConnectionRefusedError) as e:
+                redis.exceptions.ConnectionError, ConnectionRefusedError):
             return False
         except (TypeError):
             return False
         return True
 
-    
     def __checkRedisConfigReady(self, msg = None):
-        if self.db.get("health_monitor_cfg:config_ready") == "true":
+        try:
+            if self.db.get("health_monitor_cfg:config_ready") == "true":
+                self.redis_config_ready_ev.set()
+        except redis.exceptions.ConnectionError:
             self.redis_config_ready_ev.set()
 
 
+    def checkRedisConfigReady(self):
+        while True:
+            try:
+                message = self.pubsub.get_message()
+            except redis.exceptions.ConnectionError:
+                self.pubsub = self.db.pubsub()
+                self.pubsub.subscribe('config_ready')
+            if message:
+                if self.db.get("health_monitor_cfg:config_ready") == "true":
+                    self.redis_config_ready_ev.set()

@@ -21,7 +21,6 @@
         "TPV": {
             "GPS:statuses:lat": null,
             "GPS:statuses:lon": null,
-            "GPS:statuses:device": null,
             "GPS:statuses:mode": null,
             "GPS:statuses:altHAE": null,
             "GPS:statuses:speed": null,
