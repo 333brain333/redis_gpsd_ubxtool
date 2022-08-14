@@ -24,7 +24,7 @@ from health_reporter import Error, ErrorType, ErrorSource, HealthReporter
 ZED_F9P = '/dev/serial/by-id/usb-u-blox_AG_-_www.u-blox.com_u-blox_GNSS_receiver-if00'
 
 with open(Path(__file__).parent / Path('redis_connection_settings.json'), 'r') as file:
-    redis_connection_settings = json.load(file)
+    REDIS_CONNECTION_SETTINGS = json.load(file)
 
 class ErrCode(Enum):
     """
@@ -454,7 +454,7 @@ if __name__=='__main__':
 
         err_que = OrderedSetPriorityQueue(maxlen = len(ErrCode))
 
-        err_report = ErrReportClass(err_que, logger, **redis_connection_settings)
+        err_report = ErrReportClass(err_que, logger, **REDIS_CONNECTION_SETTINGS)
         err_report.start()
         while not err_report.is_alive():
             sleep(1)

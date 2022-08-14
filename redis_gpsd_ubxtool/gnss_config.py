@@ -6,25 +6,23 @@ Configures ZED-F9P with Redis
 '''
 from time import sleep
 import threading
+import os
 import subprocess
 from enum import Enum
 import logging
 from logging.handlers import RotatingFileHandler
 import json
-import re
+import signal
 import syslog
 from pathlib import Path
 from gps import gps,WATCH_ENABLE
 import redis
 from setqueue import OrderedSetPriorityQueue
 from health_reporter import Error, ErrorType, ErrorSource, HealthReporter
-
+    
 ZED_F9P = '/dev/serial/by-id/usb-u-blox_AG_-_www.u-blox.com_u-blox_GNSS_receiver-if00'
 with open(Path(__file__).parent / Path('redis_connection_settings.json'), 'r') as file:
     REDIS_CONNECTION_SETTINGS = json.load(file)
-
-
-
 
 
 class ErrCode(Enum):
@@ -72,6 +70,20 @@ class LogLog():
         self.app_log.error(text)
         syslog.syslog(syslog.LOG_ERR, text)
 
+
+class GracefulKiller:
+    '''
+    Returns true if programm main process was interrupted
+    '''
+    kill_now = False
+    def __init__(self):
+        signal.signal(signal.SIGINT, self.exit_gracefully)
+        signal.signal(signal.SIGTERM, self.exit_gracefully)
+
+    def exit_gracefully(self, *args):
+        self.kill_now = True
+
+
 def run(command:str):
     '''
     Starts subprocess and waits untill it exits. Reads stdout after subpocess completes.
@@ -89,19 +101,15 @@ def run(command:str):
         return False
     return process_output.decode('utf-8')
 
-class GpsPoller(threading.Thread):
+class GnssStatuses(threading.Thread):
 
     '''
     Obtains data from gpsd and updating redis db with those data
     '''
 
     def __init__(self, log_log: LogLog):
-        threading.Thread.__init__(self, name='GPSD_poller')
+        threading.Thread.__init__(self, name='GPSD_poller', daemon=True)
         self.log_log = log_log
-        self.__flag = threading.Event() # The flag used to pause the thread
-        self.__flag.set() # Set to True
-        self.__running = threading.Event() # Used to stop the thread identification
-        self.__running.set() # Set running to True
         #starting the stream of info from gpsd in json format
         while True:
             try:
@@ -118,13 +126,12 @@ class GpsPoller(threading.Thread):
         'gspd' key (lat, lon, device, mode, altHAE, speed, eph, time, hdop)
         '''
         for key in redis_client.keys('GPS:statuses:*'):
-            field = key.decode('utf-8').replace('GPS:statuses:','')
+            field = key.replace('GPS:statuses:','')
             value = getattr(report, field, 'Unknown')
             redis_client.set(field, str(value))
 
     def run(self):
-        while self.__running.isSet():
-            self.__flag.wait()
+        while True:
             try:
                 #this will continue to loop and grab EACH set of gpsd info to clear the buffer
                 report = self.gpsd.next()
@@ -149,18 +156,6 @@ class GpsPoller(threading.Thread):
                 pass
             #sleep(0.5) #set to whatever
 
-    def pause(self):
-        'pauses the thread'
-        self.__flag.clear()
-    def resume(self):
-        'resumes the paused thread'
-        self.__flag.set()
-    def stop(self):
-        'stops the thread'
-        self.__flag.clear()
-        self.__running.clear()
-        self.join()
-
 
 class WatchDog(threading.Thread):
     '''
@@ -170,14 +165,9 @@ class WatchDog(threading.Thread):
     def __init__(self, log_log: LogLog):
         threading.Thread.__init__(self, name='WatchDog')
         self.log_log = log_log
-        self.__flag = threading.Event() # The flag used to pause the thread
-        self.__flag.set() # Set to True
-        self.__running = threading.Event() # Used to stop the thread identification
-        self.__running.set() # Set running to True
 
     def run(self):
-        while self.__running.isSet():
-            self.__flag.wait()
+        while not killer.kill_now:
             #Check whether the gpsd systemd service started and works properly
             #gpsd:ERROR: response: {"class":"ERROR","message":"Can't open
             if not ubxtool.check_gpsd_connection():
@@ -187,14 +177,6 @@ class WatchDog(threading.Thread):
                 sleep(1)
             sleep(1)
 
-    def pause(self):
-        self.__flag.clear()
-    def resume(self):
-        self.__flag.set()
-    def stop(self):
-        self.__flag.clear()
-        self.__running.clear()
-        self.join()
 
 class Ubxtool():
     '''
@@ -254,89 +236,31 @@ class Ubxtool():
             sleep(1)
 
 
-class ubx_to_redis(threading.Thread):
+class GnssSettings(threading.Thread):
     '''
     Obtains current configuration of zef-fp9 by requesting fields from 
     key 'ubxtool' from redis_defaults dictionary. If those configurations 
     are vary from those in dictionary it chnges them in zed-f9p accordingly
     by means of ubx tool
     '''
-    def __init__(self):
-        threading.Thread.__init__(self)
-        self.__flag = threading.Event()
-        self.__flag.set()
-        self.__running = threading.Event()
-        self.__running.set()
+    def __init__(self, log_log: LogLog):
+        threading.Thread.__init__(self, daemon=True, name='GnssSettings')
+        self.log_log = log_log
     def run(self):
-        while self.__running.isSet():
-            self.__flag.wait()
-            for item_ in list(redis_defaults['ubxtool'].keys()):
-                item = item_.split(':')[-1:][0]
-                a = run(self.ubx_get_item(item))
-                b = re.search('UBX-CFG-VALGET:\\n version \d layer \d reserved 0,0\\n  layers \(ram\)\\n    item {}/0x\d* val \d*'.format(item), a)
-                try:
-                    c = re.findall('val \d*', b.group(0))[0].split(' ')[1]
-                except AttributeError:
-                    #print('No value in {} from ubxtool'.format(item))
-                    syslog.syslog(syslog.LOG_ERR, 'No value in {} from ubxtool'.format(item))
-                    continue
-                if int(c) != redis_defaults['ubxtool'][item_]:
-                    #print("Redis has changed {} from {} to {}".format(item,c,redis_defaults['ubxtool'][item_]))
-                    syslog.syslog(syslog.LOG_ERR, "Redis has changed {} from {} to {}".format(item,c,redis_defaults['ubxtool'][item_]))
-                    app = run('ubxtool -P 27.12 -z {},{} 127.0.0.1:2947:{}'.format(item, redis_defaults['ubxtool'][item_], ZED_F9P))
+        while True:
+            for redis_field in redis_client.keys('GPS:statuses:*'):
+                if not "RTK" in redis_field:
+                    redis_value = redis_client.get(redis_field)
                     try:
-                        if re.findall('UBX-ACK-\w*', app)[0] == 'UBX-ACK-NAK':
-                            redis_defaults['ubxtool'][item_] = int(c)
-                            redis_client.set(item_, c)
-                    except IndexError:
-                        redis_defaults['ubxtool'][item_] = int(c) 
-                        redis_client.set(item_, c)
+                        if zedf9p_current_config[redis_field] != redis_value:
+                            self.log_log.info(f'{redis_field},{redis_value}->ublox')
+                            ubxtool.set(redis_field, int(redis_value))
+                    except KeyError:
+                        zedf9p_current_config[redis_field] = redis_value
+                        ubxtool.set(redis_field, redis_value)
+                    redis_value = redis_client.get(redis_field)
             sleep(1)
 
-    def pause(self):
-        self.__flag.clear()
-    def resume(self):
-        self.__flag.set()
-    def stop(self):
-        self.__flag.clear()
-        self.__running.clear()
-        self.join()
-    
-
-class redis_get(threading.Thread):
-    '''
-    Gets values for 'ubxtool' keys from 
-    redis or passes defaults to redis if they doesn't exists in the database
-    '''
-    def __init__(self):
-        threading.Thread.__init__(self)
-        self.__flag = threading.Event()
-        self.__flag.set()
-        self.__running = threading.Event()
-        self.__running.set()
-    def run(self):
-        redis_client.set("GPS:statuses:RTK:errors", '')
-        while self.__running.isSet():
-            self.__flag.wait()
-            #Get values for 'ubxtool' key from redis or pass defaults to redis if they doesn't exists in database
-            for item in list(redis_defaults['ubxtool'].keys()):
-                if redis_client.exists(item):
-                    try:
-                        redis_defaults['ubxtool'][item] = int(redis_client.get(item))
-                    except (ValueError, TypeError):
-                        redis_client.set(item, redis_defaults['ubxtool'][item])
-                else:
-                    redis_client.set(item,redis_defaults['ubxtool'][item])
-
-            sleep(2)
-    def pause(self):
-        self.__flag.clear()
-    def resume(self):
-        self.__flag.set()
-    def stop(self):
-        self.__flag.clear()
-        self.__running.clear()
-        self.join()
 
 #Start_gspd_class and stop_gpsd_class are workind as a light switch:
 #if you've turned light off then you can't turn it once again but you can
@@ -440,45 +364,36 @@ class ErrReportClass(threading.Thread):
 
 
 if __name__ == '__main__':
-    zedf9p_current_config: dict = {}
-    logger = LogLog()
-    err_que = OrderedSetPriorityQueue(maxlen = len(ErrCode))
-    err_report = ErrReportClass(err_que, logger, redis_host=REDIS_CONNECTION_SETTINGS['host'])
-    while True:
-        try:
-            redis_client = redis.StrictRedis(**REDIS_CONNECTION_SETTINGS)
-            break
-        except redis.exceptions.ConnectionError:
-            logger.error(
-                f"couldn't connect to the redis server {REDIS_CONNECTION_SETTINGS['host']}")
-            sleep(1)
-    stop_gpsd = StopGpsd(logger)
-    start_gpsd = StartGpsd(logger)
-    ubxtool = Ubxtool(logger, err_que)
-    #threads:
-    redis_get_thread = redis_get()
-    gps_poller = GpsPoller(logger)
-    watchdog = WatchDog(logger)
-    ubx_to_redis_thread = ubx_to_redis()
-
     try:
+        killer = GracefulKiller()
+        zedf9p_current_config: dict = {}
+        logger = LogLog()
+        err_que = OrderedSetPriorityQueue(maxlen = len(ErrCode))
+        err_report = ErrReportClass(err_que, logger, redis_host=REDIS_CONNECTION_SETTINGS['host'])
+        while True:
+            try:
+                redis_client = redis.StrictRedis(decode_responses=True, **REDIS_CONNECTION_SETTINGS)
+                break
+            except redis.exceptions.ConnectionError:
+                logger.error(
+                    f"couldn't connect to the redis server {REDIS_CONNECTION_SETTINGS['host']}")
+                sleep(1)
+        stop_gpsd = StopGpsd(logger)
+        start_gpsd = StartGpsd(logger)
+        ubxtool = Ubxtool(logger, err_que)
+
+        #threads:
+        gnss_statuses = GnssStatuses(logger)
+        watchdog = WatchDog(logger)
+        gnss_settings = GnssSettings(logger)
+
         watchdog.start()
-        redis_get_thread.start()
-        gps_poller.start() # start it up
-        ubx_to_redis_thread.start()
+        gnss_statuses.start() # start it up
+        gnss_settings.start()
 
-    except (KeyboardInterrupt, SystemExit): #when you press ctrl+c
-        print("Killing Thread...")
-        redis_get_thread.stop()
-        gps_poller.stop() # wait for the thread to finish what it's doing
+    except (KeyboardInterrupt, SystemExit):
+        logger.info("Finished running gnss_config...")
+        gnss_statuses.stop() # wait for the thread to finish what it's doing
         watchdog.stop()
-        ubx_to_redis_thread.stop()
-        with open(Path(__file__).parent / Path('redis_fields_gpsd.json'), 'w') as file:
-            json.dump(redis_defaults, file)
-        #run('journalctl -r -S today -u gps_handler_agro.service >\
-        #     between_redis_and_ubxtool_log.txt')
-   # print("Done.\nExiting.")
-
-
-
-##########################THAT'S ALL, FOLKS!##########################
+        gnss_settings.stop()
+        os._exit(0)

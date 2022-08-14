@@ -29,7 +29,7 @@ except ModuleNotFoundError:
     pass
 
 with open(Path(__file__).parent / Path('redis_connection_settings.json'), 'r') as file:
-    redis_connection_settings = json.load(file)
+    REDIS_CONNECTION_SETTINGS = json.load(file)
 
 FILENAME = str(Path(__file__).parent.resolve())
 
@@ -295,7 +295,7 @@ class RedisHandler(Thread):
                         run('systemctl stop cgn_escape_ntrip.service')
             else:
                 logger.error(
-                    f"couldn't connect to the redis server {redis_connection_settings['host']}")
+                    f"couldn't connect to the redis server {REDIS_CONNECTION_SETTINGS['host']}")
             sleep(1)
         logger.info("finished running ntrip_config...")
         os._exit(0)
@@ -306,15 +306,15 @@ if __name__=='__main__':
         logger = LogLog()
         logger.info("cgn_ntrip_config.service started")
         err_que = OrderedSetPriorityQueue(maxlen = len(ErrCode))
-        err_report = ErrReportClass(err_que, logger, **redis_connection_settings)
+        err_report = ErrReportClass(err_que, logger, **REDIS_CONNECTION_SETTINGS)
         err_report.start()
         while True:
             try:
-                redis_client = RedisHandler(err_que, **redis_connection_settings)
+                redis_client = RedisHandler(err_que, **REDIS_CONNECTION_SETTINGS)
                 break
             except redis.exceptions.ConnectionError:
                 logger.error(
-                    f"couldn't connect to the redis server {redis_connection_settings['host']}")
+                    f"couldn't connect to the redis server {REDIS_CONNECTION_SETTINGS['host']}")
                 sleep(1)
         if 'Blowfish' in dir():
             redis_client.strict_redis.set('GPS:settings:RTK:passwordEncryption', 'blowfish')
