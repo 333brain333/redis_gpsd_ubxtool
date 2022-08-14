@@ -20,9 +20,11 @@ from setqueue import OrderedSetPriorityQueue
 from health_reporter import Error, ErrorType, ErrorSource, HealthReporter
 
 ZED_F9P = '/dev/serial/by-id/usb-u-blox_AG_-_www.u-blox.com_u-blox_GNSS_receiver-if00'
-
 with open(Path(__file__).parent / Path('redis_connection_settings.json'), 'r') as file:
-    redis_connection_settings = json.load(file)
+    REDIS_CONNECTION_SETTINGS = json.load(file)
+
+
+
 
 
 class ErrCode(Enum):
@@ -110,21 +112,15 @@ class GpsPoller(threading.Thread):
             sleep(1) #starting the stream of info
 
     @classmethod
-    def get_from_buffer(cls, msg_type, report):
+    def get_from_buffer(cls, report):
         '''
         Updates a redis database with fields defined in the redis_defaults under
         'gspd' key (lat, lon, device, mode, altHAE, speed, eph, time, hdop)
         '''
-        if msg_type == "TPV":
-            for field_ in list(redis_defaults['gpsd']['TPV'].keys()):
-                field = field_.split(':')[-1:][0]
-                result = getattr(report, field, 'Unknown')
-                redis_client.set(field_,str(result))
-        elif msg_type == "SKY":
-            for field_ in list(redis_defaults['gpsd']['SKY'].keys()): # get HDOP
-                field = field_.split(':')[-1:][0]
-                result = getattr(report, field, 'Unknown')
-                redis_client.set(field_,str(result))
+        for key in redis_client.keys('GPS:statuses:*'):
+            field = key.decode('utf-8').replace('GPS:statuses:','')
+            value = getattr(report, field, 'Unknown')
+            redis_client.set(field, str(value))
 
     def run(self):
         while self.__running.isSet():
@@ -144,9 +140,9 @@ class GpsPoller(threading.Thread):
                     sleep(1)
             try:
                 if report['class'] == 'TPV':
-                    self.get_from_buffer('TPV', report)
+                    self.get_from_buffer(report)
                 elif report['class'] == 'SKY':
-                    self.get_from_buffer('SKY', report)
+                    self.get_from_buffer(report)
                 elif report['class'] == 'ERROR':
                     self.log_log.error(report['message'])
             except (KeyError, TypeError):
@@ -444,15 +440,17 @@ class ErrReportClass(threading.Thread):
 
 
 if __name__ == '__main__':
+    zedf9p_current_config: dict = {}
     logger = LogLog()
     err_que = OrderedSetPriorityQueue(maxlen = len(ErrCode))
-    err_report = ErrReportClass(err_que, logger, redis_host=REDIS_HOST)
+    err_report = ErrReportClass(err_que, logger, redis_host=REDIS_CONNECTION_SETTINGS['host'])
     while True:
         try:
-            redis_client = redis.StrictRedis(**redis_connection)
+            redis_client = redis.StrictRedis(**REDIS_CONNECTION_SETTINGS)
             break
         except redis.exceptions.ConnectionError:
-            logger.error(f"couldn't connect to the redis server {REDIS_HOST}")
+            logger.error(
+                f"couldn't connect to the redis server {REDIS_CONNECTION_SETTINGS['host']}")
             sleep(1)
     stop_gpsd = StopGpsd(logger)
     start_gpsd = StartGpsd(logger)
