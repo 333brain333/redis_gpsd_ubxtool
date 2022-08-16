@@ -1,0 +1,16 @@
+[Unit]
+Description= --- AgroNav GPS Forwarder ---
+After=cgn_gpsd.service multi-user.target
+
+[Service]
+Type=exec
+Environment="PYTHONPATH=/home/agrodroid/releases/active_release/redis_gpsd_ubxtool/gpsd/lib/python3/dist-packages"
+Environment="PATH=/home/agrodroid/releases/active_release/redis_gpsd_ubxtool/gpsd/bin/:/usr/bin"
+ExecStart=/usr/bin/python3 /home/agrodroid/releases/active_release/redis_gpsd_ubxtool/gnss_config.py
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+Also=cgn_gpsd.service
+
