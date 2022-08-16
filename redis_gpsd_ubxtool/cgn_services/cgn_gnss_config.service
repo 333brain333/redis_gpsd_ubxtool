@@ -1,6 +1,6 @@
 [Unit]
 Description= --- AgroNav GPS Forwarder ---
-After=cgn_gpsd.service
+After=cgn_gpsd.service multi-user.target
 
 [Service]
 Type=exec
