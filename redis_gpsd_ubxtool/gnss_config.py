@@ -1,10 +1,13 @@
 # pylint: disable=import-error
 # pylint: disable=too-many-instance-attributes
+# pylint: disable=redefined-builtin
+# pylint: disable=too-few-public-methods
+# pylint: disable=protected-access
 
 '''
 Configures ZED-F9P with Redis
 '''
-from time import sleep, time
+from time import sleep
 import threading
 import os
 import subprocess
@@ -19,7 +22,7 @@ from gps import gps,WATCH_ENABLE
 import redis
 from setqueue import OrderedSetPriorityQueue
 from health_reporter import Error, ErrorType, ErrorSource, HealthReporter
-    
+
 ZED_F9P = '/dev/serial/by-id/usb-u-blox_AG_-_www.u-blox.com_u-blox_GNSS_receiver-if00'
 with open(Path(__file__).parent / Path('redis_connection_settings.json'), 'r') as file:
     REDIS_CONNECTION_SETTINGS = json.load(file)
@@ -88,7 +91,9 @@ class GracefulKiller:
         signal.signal(signal.SIGINT, self.exit_gracefully)
         signal.signal(signal.SIGTERM, self.exit_gracefully)
 
-    def exit_gracefully(self, *args):
+    def exit_gracefully(self):
+        '''
+        Rise this flag to exit gracefully'''
         self.kill_now = True
 
 
@@ -139,7 +144,7 @@ class GnssStatuses(threading.Thread):
             try:
                 for key in redis_client.keys('GPS:statuses:*'):
                     field = key.replace('GPS:statuses:','')
-                    for gpsd_json in self.zedf9p_current_statuses.keys():
+                    for gpsd_json in self.zedf9p_current_statuses:
                         if field in self.zedf9p_current_statuses[gpsd_json]:
                             value = getattr(
                                 self.zedf9p_current_statuses[gpsd_json], field, 'Unknown')
@@ -148,7 +153,7 @@ class GnssStatuses(threading.Thread):
             except KeyError:
                 pass
             sleep(3)
-    
+
     def get_from_gpsd(self):
         '''
         Obtains jsons from gpsd and saves them in a local dict
@@ -177,8 +182,14 @@ class GnssStatuses(threading.Thread):
             #sleep(0.5) #set to whatever
 
     def run(self):
-        get_from_gpsd = threading.Thread(target=self.get_from_gpsd, daemon=True, name='get_from_gpsd')
-        get_from_buffer = threading.Thread(target=self.get_from_buffer, daemon=True, name='get_from_buffer')
+        get_from_gpsd = threading.Thread(
+            target=self.get_from_gpsd,
+            daemon=True,
+            name='get_from_gpsd')
+        get_from_buffer = threading.Thread(
+            target=self.get_from_buffer,
+            daemon=True,
+            name='get_from_buffer')
         get_from_gpsd.start()
         get_from_buffer.start()
 
@@ -213,9 +224,9 @@ class Ubxtool():
     output
     '''
 
-    def __init__(self, log_log: LogLog, err_que: OrderedSetPriorityQueue) -> None:
+    def __init__(self, log_log: LogLog, err_que_: OrderedSetPriorityQueue) -> None:
         self.log_log = log_log
-        self.err_que = err_que
+        self.err_que = err_que_
 
     def check_gpsd_connection(self)->bool:
         '''
@@ -270,8 +281,8 @@ class Ubxtool():
 
 class GnssSettings(threading.Thread):
     '''
-    Obtains current configuration of zef-fp9 by requesting fields from 
-    key 'ubxtool' from redis_defaults dictionary. If those configurations 
+    Obtains current configuration of zef-fp9 by requesting fields from
+    key 'ubxtool' from redis_defaults dictionary. If those configurations
     are vary from those in dictionary it chnges them in zed-f9p accordingly
     by means of ubx tool
     '''
@@ -288,22 +299,23 @@ class GnssSettings(threading.Thread):
                     try:
                         if self.zedf9p_current_settings[redis_field] != redis_value:
                             self.zedf9p_current_settings[redis_field] = redis_value
-                            self.log_log.info(f'setting has changed {redis_field},{redis_value} -> ublox')
-                            result = ubxtool.set(
+                            self.log_log.info(
+                                f'setting has changed {redis_field},{redis_value} -> ublox')
+                            ubxtool.set(
                                 redis_field,
                                 int(redis_value))
                     except KeyError:
                         self.log_log.info(f'new/init setting {redis_field},{redis_value} -> ublox')
                         self.zedf9p_current_settings[redis_field] = redis_value
-                        result = ubxtool.set(redis_field, redis_value)
+                        ubxtool.set(redis_field, redis_value)
                     redis_value = redis_client.get(redis_field)
             sleep(1)
 
 
 #Start_gspd_class and stop_gpsd_class are workind as a light switch:
 #if you've turned light off then you can't turn it once again but you can
-#turn it on once. Alternativly if you turned the light on, you can't turn it on 
-#again -  instead you can turn it off once. 
+#turn it on once. Alternativly if you turned the light on, you can't turn it on
+#again -  instead you can turn it off once.
 class StartGpsd():
     '''
     Starts systemd service cgn_gpsd.service

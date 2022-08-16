@@ -1,7 +1,6 @@
 [Unit]
 Description= --- AgroNav GPS Forwarder ---
 After=cgn_gpsd.service
-# Needed with chrony SOCK refclock
 
 [Service]
 Type=exec
