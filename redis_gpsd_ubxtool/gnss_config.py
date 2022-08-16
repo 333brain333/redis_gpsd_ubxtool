@@ -91,7 +91,7 @@ class GracefulKiller:
         signal.signal(signal.SIGINT, self.exit_gracefully)
         signal.signal(signal.SIGTERM, self.exit_gracefully)
 
-    def exit_gracefully(self):
+    def exit_gracefully(self, *args):
         '''
         Rise this flag to exit gracefully'''
         self.kill_now = True
@@ -388,7 +388,7 @@ class ErrReportClass(threading.Thread):
             # или не указаны необходимые устройства
             # поэтому не нужно рапортовать об ошибках
             if self._error_sender.isRedisConfigReady():
-                #print("ready")
+                self.log_log.debug('ready')
                 break
             sleep(1)
         # cycle to check health
@@ -401,7 +401,7 @@ class ErrReportClass(threading.Thread):
                     err_code = self._err_queue.pop()
                     err = Error(self._msg_source, self._msg_type, err_code)
                     self._error_sender.pushError(err)
-                    #print("spin")
+                    self.log_log.debug('spin')
                 except IndexError:
                     pass
                 if self._error_sender.getSecondsToNextKeepalive() < 0:

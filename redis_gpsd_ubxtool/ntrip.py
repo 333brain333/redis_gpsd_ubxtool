@@ -16,7 +16,6 @@ import signal
 import json
 from time import sleep, time
 import argparse
-from tkinter import E
 from gps import gps,WATCH_ENABLE
 from setqueue import OrderedSetPriorityQueue
 from health_reporter import Error, ErrorType, ErrorSource, HealthReporter
@@ -92,6 +91,14 @@ class LogLog():
         self.app_log.info(text)
         syslog.syslog(syslog.LOG_INFO, text)
 
+    def debug(self, text:str)->None:
+        '''
+        Info level loging into a file and the syslog
+        '''
+        print(text)
+        self.app_log.debug(text)
+        syslog.syslog(syslog.LOG_DEBUG, text)
+
     def error(self, text:str)->None:
         '''
         Error level loging into a file and the syslog
@@ -111,8 +118,8 @@ class ErrReportClass(Thread):
     **kwargs) -> None:
         Thread.__init__(self, daemon=True, name="ErrReport")
         self.log_log = log_log
-        self._redis_host = host
-        self._redis_port = port
+        self._redis_host = kwargs['host']
+        self._redis_port = kwargs['port']
         self._msg_type = ErrorType.error
         self._msg_source = ErrorSource.GPSservice
         self._error_sender = HealthReporter(self._msg_source, self._redis_host, self._redis_port)
@@ -135,7 +142,7 @@ class ErrReportClass(Thread):
             # или не указаны необходимые устройства
             # поэтому не нужно рапортовать об ошибках
             if self._error_sender.isRedisConfigReady():
-                #print("ready")
+                self.log_log.debug('ready')
                 break
             sleep(1)
         # cycle to check health
@@ -153,7 +160,7 @@ class ErrReportClass(Thread):
                         watch_dog.resume()
                     else:
                         start_ntrip.resume()
-                    #print("spin")
+                    self.log_log.debug('spin')
                 except IndexError:
                     pass
                 if self._error_sender.getSecondsToNextKeepalive() < 0:

@@ -4,6 +4,8 @@
 # pylint: disable=abstract-method
 # pylint: disable=redefined-builtin
 # pylint: disable=too-many-instance-attributes
+# pylint: disable=too-few-public-methods
+# pylint: disable=broad-except
 '''
 Application aimed to pull redis fileds in order to
 maintain cgn_escape_ntrip.service and lora service
@@ -30,7 +32,6 @@ except ModuleNotFoundError:
 
 with open(Path(__file__).parent / Path('redis_connection_settings.json'), 'r') as file:
     REDIS_CONNECTION_SETTINGS = json.load(file)
-
 FILENAME = str(Path(__file__).parent.resolve())
 
 class ErrCode(Enum):
@@ -54,6 +55,9 @@ class GracefulKiller:
         signal.signal(signal.SIGTERM, self.exit_gracefully)
 
     def exit_gracefully(self, *args):
+        '''
+        Raise flag to exit gracefully
+        '''
         self.kill_now = True
 
 
@@ -84,6 +88,14 @@ class LogLog():
         self.app_log.info(text)
         syslog.syslog(syslog.LOG_INFO, text)
 
+    def debug(self, text:str)->None:
+        '''
+        Info level loging into a file and the syslog
+        '''
+        print(text)
+        self.app_log.debug(text)
+        syslog.syslog(syslog.LOG_DEBUG, text)
+
     def error(self, text:str)->None:
         '''
         Error level loging into a file and the syslog
@@ -104,8 +116,8 @@ class ErrReportClass(Thread):
     **kwargs) -> None:
         Thread.__init__(self, daemon=True, name="ErrReport")
         self.log_log = log_log
-        self._redis_host = host
-        self._redis_port = port
+        self._redis_host = kwargs['host']
+        self._redis_port = kwargs['port']
         self._msg_type = ErrorType.error
         self._msg_source = ErrorSource.GPSservice
         self._error_sender = HealthReporter(self._msg_source, self._redis_host, self._redis_port)
@@ -128,7 +140,7 @@ class ErrReportClass(Thread):
             # или не указаны необходимые устройства
             # поэтому не нужно рапортовать об ошибках
             if self._error_sender.isRedisConfigReady():
-                #print("ready")
+                self.log_log.debug('ready')
                 break
             sleep(1)
         # cycle to check health
@@ -141,7 +153,7 @@ class ErrReportClass(Thread):
                     err_code = self._err_queue.pop()
                     err = Error(self._msg_source, self._msg_type, err_code)
                     self._error_sender.pushError(err)
-                    #print("spin")
+                    self.log_log.debug('spin')
                 except IndexError:
                     pass
                 if self._error_sender.getSecondsToNextKeepalive() < 0:
@@ -192,10 +204,10 @@ class RedisHandler(Thread):
     err_queue: OrderedSetPriorityQueue,
     **kwargs):
         Thread.__init__(self, name = 'RedisHandler')
-        self.redis_host = host
-        self.redis_port = port
-        self.redis_pssw = pssw
-        self.redis_db = db
+        self.redis_host = kwargs['host']
+        self.redis_port = kwargs['port']
+        self.redis_pssw = kwargs['password']
+        self.redis_db = kwargs['db']
         self.strict_redis = redis.StrictRedis(host=self.redis_host,
                                     port=self.redis_port,
                                     password=self.redis_pssw,
