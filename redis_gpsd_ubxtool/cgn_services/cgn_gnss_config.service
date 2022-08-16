@@ -1,6 +1,7 @@
 [Unit]
 Description= --- AgroNav GPS Forwarder ---
-After=multi-user.target
+After=cgn_gpsd.service
+# Needed with chrony SOCK refclock
 
 [Service]
 Type=exec
@@ -12,4 +13,5 @@ RestartSec=10
 
 [Install]
 WantedBy=multi-user.target
+Also=cgn_gpsd.service
 
