@@ -125,8 +125,17 @@ class GnssStatuses(threading.Thread):
         self.log_log = log_log
         self.zedf9p_current_statuses: dict = {}
         #starting the stream of info from gpsd in json format
-        for key in redis_client.keys('GPS:statuses:*'):
-            redis_client.set(key, 'Unknown')
+        while True:
+            try:
+                for key in redis_client.keys('GPS:statuses:*'):
+                    redis_client.set(key, 'Unknown')
+                break
+            except (redis.exceptions.TimeoutError, redis.connection.socket.timeout,
+                    redis.exceptions.ConnectionError, ConnectionRefusedError, TypeError):
+                self.log_log.error(
+                    f"couldn't connect to the redis server {REDIS_CONNECTION_SETTINGS['host']}")
+            sleep(1)
+
         while True:
             try:
                 self.gpsd = gps(mode=WATCH_ENABLE)
@@ -142,16 +151,21 @@ class GnssStatuses(threading.Thread):
         '''
         while True:
             try:
-                for key in redis_client.keys('GPS:statuses:*'):
-                    field = key.replace('GPS:statuses:','')
-                    for gpsd_json in self.zedf9p_current_statuses:
-                        if field in self.zedf9p_current_statuses[gpsd_json]:
-                            value = getattr(
-                                self.zedf9p_current_statuses[gpsd_json], field, 'Unknown')
-                            redis_client.set(f'GPS:statuses:{field}', str(value))
-                            # logger.debug(f'gpsd {field} -> redis')
-            except KeyError:
-                pass
+                try:
+                    for key in redis_client.keys('GPS:statuses:*'):
+                        field = key.replace('GPS:statuses:','')
+                        for gpsd_json in self.zedf9p_current_statuses:
+                            if field in self.zedf9p_current_statuses[gpsd_json]:
+                                value = getattr(
+                                    self.zedf9p_current_statuses[gpsd_json], field, 'Unknown')
+                                redis_client.set(f'GPS:statuses:{field}', str(value))
+                                # logger.debug(f'gpsd {field} -> redis')
+                except KeyError:
+                    pass
+            except (redis.exceptions.TimeoutError, redis.connection.socket.timeout,
+                    redis.exceptions.ConnectionError, ConnectionRefusedError, TypeError):
+                self.log_log.error(
+                    f"couldn't connect to the redis server {REDIS_CONNECTION_SETTINGS['host']}")
             sleep(3)
 
     def get_from_gpsd(self):
@@ -194,29 +208,6 @@ class GnssStatuses(threading.Thread):
         get_from_buffer.start()
 
 
-
-
-class WatchDog(threading.Thread):
-    '''
-    Stops gpsd systemd service and pauses all threads except himself
-    in case of zed-f9p is not connected
-    '''
-    def __init__(self, log_log: LogLog):
-        threading.Thread.__init__(self, name='WatchDog')
-        self.log_log = log_log
-
-    def run(self):
-        while not killer.kill_now:
-            #Check whether the gpsd systemd service started and works properly
-            #gpsd:ERROR: response: {"class":"ERROR","message":"Can't open
-            if not ubxtool.check_gpsd_connection():
-                self.log_log.error('Watchdog: no connection to GNSS module')
-                stop_gpsd.run()
-                start_gpsd.run()
-                os._exit(1)
-            sleep(1)
-
-
 class Ubxtool():
     '''
     Configures zed-f9p with a given command
@@ -227,12 +218,13 @@ class Ubxtool():
     def __init__(self, log_log: LogLog, err_que_: OrderedSetPriorityQueue) -> None:
         self.log_log = log_log
         self.err_que = err_que_
+        self.set('CFG-UART1-BAUDRATE','115200', True)
 
     def check_gpsd_connection(self)->bool:
         '''
         Returns true if gpsd is attached to the GNSS module
         '''
-        if self.set('CFG-UART1-BAUDRATE','115200'):
+        if self.set('CFG-UART1-BAUDRATE','115200', False):
             return True
         return False
 
@@ -257,13 +249,16 @@ class Ubxtool():
                     self.log_log.error(f'get error: {out}')
                 sleep(1)
 
-    def set(self, pos: str, value: int)->bool:
+    def set(self, pos: str, value: int, log: bool = True)->bool:
         '''
         Sets value by its position
         '''
         while True:
             out = run(f'ubxtool -z {pos},{value} 127.0.0.1:2947:{ZED_F9P}')
             if 'UBX-ACK-ACK' in out:
+                if log:
+                    self.log_log.info(
+                        f'successfull set {pos},{value}')
                 return True
             if 'UBX-ACK-NAK' in out:
                 self.log_log.error(f"{pos},{value} FAIL")
@@ -279,6 +274,27 @@ class Ubxtool():
             sleep(1)
 
 
+class WatchDog(threading.Thread):
+    '''
+    Stops gpsd systemd service and pauses all threads except himself
+    in case of zed-f9p is not connected
+    '''
+    def __init__(self, log_log: LogLog):
+        threading.Thread.__init__(self, name='WatchDog')
+        self.log_log = log_log
+
+    def run(self):
+        while not killer.kill_now:
+            #Check whether the gpsd systemd service started and works properly
+            #gpsd:ERROR: response: {"class":"ERROR","message":"Can't open
+            if not ubxtool.check_gpsd_connection():
+                self.log_log.error('Watchdog: no connection to GNSS module')
+                stop_gpsd.run()
+                start_gpsd.run()
+                os._exit(1)
+            sleep(5)
+
+
 class GnssSettings(threading.Thread):
     '''
     Obtains current configuration of zef-fp9 by requesting fields from
@@ -292,23 +308,24 @@ class GnssSettings(threading.Thread):
         self.zedf9p_current_settings: dict = {}
     def run(self):
         while True:
-            for redis_field in redis_client.keys('GPS:settings:*'):
-                if not "RTK" in redis_field:
-                    redis_value = redis_client.get(redis_field)
-                    redis_field = redis_field.replace('GPS:settings:','')
-                    try:
-                        if self.zedf9p_current_settings[redis_field] != redis_value:
+            try:
+                for redis_field in redis_client.keys('GPS:settings:*'):
+                    if not "RTK" in redis_field:
+                        redis_value = redis_client.get(redis_field)
+                        redis_field = redis_field.replace('GPS:settings:','')
+                        try:
+                            if self.zedf9p_current_settings[redis_field] != redis_value:
+                                self.zedf9p_current_settings[redis_field] = redis_value
+                                ubxtool.set(
+                                    redis_field,
+                                    int(redis_value))
+                        except KeyError:
                             self.zedf9p_current_settings[redis_field] = redis_value
-                            self.log_log.info(
-                                f'setting has changed {redis_field},{redis_value} -> ublox')
-                            ubxtool.set(
-                                redis_field,
-                                int(redis_value))
-                    except KeyError:
-                        self.log_log.info(f'new/init setting {redis_field},{redis_value} -> ublox')
-                        self.zedf9p_current_settings[redis_field] = redis_value
-                        ubxtool.set(redis_field, redis_value)
-                    redis_value = redis_client.get(redis_field)
+                            ubxtool.set(redis_field, redis_value)
+            except (redis.exceptions.TimeoutError, redis.connection.socket.timeout,
+                    redis.exceptions.ConnectionError, ConnectionRefusedError, TypeError):
+                self.log_log.error(
+                    f"couldn't connect to the redis server {REDIS_CONNECTION_SETTINGS['host']}")
             sleep(1)
 
 
@@ -414,30 +431,33 @@ class ErrReportClass(threading.Thread):
 
 
 if __name__ == '__main__':
+    #be caerful with changing an order of the undelying lines
     try:
         killer = GracefulKiller()
         logger = LogLog()
+        logger.info("Ntrip.service started")
         err_que = OrderedSetPriorityQueue(maxlen = len(ErrCode))
         err_report = ErrReportClass(err_que, logger, redis_host=REDIS_CONNECTION_SETTINGS['host'])
+        ubxtool = Ubxtool(logger, err_que)
+        watchdog = WatchDog(logger)
+        watchdog.start()
         while True:
             try:
                 redis_client = redis.StrictRedis(**REDIS_CONNECTION_SETTINGS)
                 logger.info(f'Connected to the redis {REDIS_CONNECTION_SETTINGS["host"]}')
                 break
-            except redis.exceptions.ConnectionError:
+            except (redis.exceptions.TimeoutError, redis.connection.socket.timeout,
+                    redis.exceptions.ConnectionError, ConnectionRefusedError, TypeError):
                 logger.error(
                     f"couldn't connect to the redis server {REDIS_CONNECTION_SETTINGS['host']}")
-                sleep(1)
+            sleep(1)
         stop_gpsd = StopGpsd(logger)
         start_gpsd = StartGpsd(logger)
-        ubxtool = Ubxtool(logger, err_que)
 
         #threads:
         gnss_statuses = GnssStatuses(logger)
-        watchdog = WatchDog(logger)
         gnss_settings = GnssSettings(logger)
 
-        watchdog.start()
         gnss_statuses.start() # start it up
         gnss_settings.start()
 
